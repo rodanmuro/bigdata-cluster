@@ -1,0 +1,18 @@
+<configuration>
+    <property>
+        <name>dfs.namenode.name.dir</name>
+        <value>file:///opt/hadoop/etc/hadoop/dfs/name</value>
+    </property>
+
+    <property>
+        <name>dfs.datanode.data.dir</name>
+        <value>file:///opt/hadoop/etc/hadoop/dfs/data</value>
+    </property>
+
+        <!-- Esto es para permitr que hive pueda crear sus archivos en la raiz, no recomendado en producción -->
+    <property>
+    <name>dfs.permissions</name>
+    <value>false</value>
+    </property>
+
+</configuration>

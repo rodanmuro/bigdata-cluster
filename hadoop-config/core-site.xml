@@ -1,0 +1,38 @@
+<configuration>
+    <property>
+        <name>fs.defaultFS</name>
+        <value>hdfs://hadoop-namenode:9000</value>
+    </property>
+
+ <!-- Lo siguiente es para permitir que hue haga impersonation es decir, que pueda acceder como admin, pues hue va a mirar los archivos como admin -->
+    <property>
+  <name>hadoop.proxyuser.hue.hosts</name>
+  <value>*</value>
+</property>
+
+<property>
+  <name>hadoop.proxyuser.hue.groups</name>
+  <value>*</value>
+</property>
+
+<!-- Esta es la configuración para aws -->
+
+<!-- Configuración general para usar el sistema de archivos S3A -->
+  <property>
+    <name>fs.s3a.impl</name>
+    <value>org.apache.hadoop.fs.s3a.S3AFileSystem</value>
+  </property>
+
+  <!-- Usa proveedor anónimo: no requiere credenciales AWS -->
+  <property>
+    <name>fs.s3a.aws.credentials.provider</name>
+    <value>org.apache.hadoop.fs.s3a.AnonymousAWSCredentialsProvider</value>
+  </property>
+
+  <!-- Acceso estilo path, necesario si tu bucket es público y no usa DNS-style virtual hosting -->
+  <property>
+    <name>fs.s3a.path.style.access</name>
+    <value>true</value>
+  </property>
+
+</configuration>
