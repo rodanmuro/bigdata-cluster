@@ -51,11 +51,26 @@ Las versiones están **fijadas intencionalmente** para garantizar compatibilidad
 
 ---
 
+## Profiles Disponibles
+
+El clúster usa **Docker Compose profiles** para permitir levantar solo los servicios que necesitas. Esto ahorra RAM y tiempo de arranque, y es útil para aprender cada componente de forma progresiva.
+
+| Profile | Servicios incluidos | RAM aprox. |
+|---------|--------------------|-----------:|
+| `hadoop` | NameNode + 2 DataNodes | ~1.5 GB |
+| `hive` | Hadoop + Metastore + HiveServer2 + Hue + PostgreSQL (x2) | ~4 GB |
+| `spark` | Hadoop + Spark Master + 2 Workers + Jupyter | ~4 GB |
+| `full` | Todo lo anterior + Superset | ~8 GB |
+
+> **Importante:** cada profile es **acumulativo** — el profile `hive` ya incluye Hadoop, no es necesario levantarlo por separado.
+
+---
+
 ## Pasos para Inicializar el Clúster
 
 ### 1. Construir la imagen de PySpark + Jupyter
 
-Este paso es **obligatorio**. La imagen se construye localmente porque requiere versiones específicas de Python y PySpark compatibles con el clúster Spark.
+Este paso es **obligatorio** antes de usar los profiles `spark` o `full`. La imagen se construye localmente porque requiere versiones específicas de Python y PySpark compatibles con el clúster Spark.
 
 ```bash
 docker build -t python-pyspark4-jupyter .
@@ -65,11 +80,23 @@ docker build -t python-pyspark4-jupyter .
 
 ### 2. Levantar los servicios
 
+Elige el profile según lo que necesites:
+
 ```bash
-docker compose up
+# Solo Hadoop/HDFS
+docker compose --profile hadoop up -d
+
+# Hadoop + Hive + Hue
+docker compose --profile hive up -d
+
+# Hadoop + Spark + Jupyter
+docker compose --profile spark up -d
+
+# Todo el clúster
+docker compose --profile full up -d
 ```
 
-> Se recomienda **no usar `-d`** (modo detach) para ver los logs en tiempo real y observar el proceso de arranque de cada servicio. Cuando Superset termine de inicializarse (el servicio más lento), aparecerá el siguiente mensaje en los logs:
+> Para el profile `full`, se recomienda **no usar `-d`** (modo detach) para ver los logs en tiempo real. Cuando Superset termine de inicializarse (el servicio más lento), aparecerá el siguiente mensaje en los logs:
 >
 > ```
 > superset  | ╔══════════════════════════════════════════════════╗
@@ -88,42 +115,69 @@ docker compose up
 
 ### 3. Ejecutar el script de inicialización
 
-Una vez todos los servicios estén corriendo, ejecutar **en otra terminal**:
+Una vez los servicios estén corriendo, ejecutar **en otra terminal** pasando el mismo profile:
 
 ```bash
 # Linux / Mac
-./post-init-cluster.sh
+./post-init-cluster.sh hadoop
+./post-init-cluster.sh hive
+./post-init-cluster.sh spark
+./post-init-cluster.sh full   # por defecto si no se pasa argumento
 
 # Windows
-post-init-cluster.bat
+post-init-cluster.bat hadoop
+post-init-cluster.bat hive
+post-init-cluster.bat spark
+post-init-cluster.bat full
 ```
 
-Este script realiza tres tareas esenciales:
-1. **Crea directorios en HDFS** (`/user/admin`, `/user/hive/warehouse`) necesarios para que Hive pueda almacenar datos
-2. **Inicializa el esquema del metastore de Hive** en PostgreSQL
-3. **Aplica las migraciones de Hue** para crear las tablas de su base de datos
+Lo que hace cada profile:
+
+| Profile | Acciones del script |
+|---------|-------------------|
+| `hadoop` | Crea directorios en HDFS (`/user/admin`, `/user/hive/warehouse`) |
+| `hive` | Lo anterior + inicializa metastore de Hive + migraciones de Hue |
+| `spark` | Crea directorios en HDFS |
+| `full` | Lo mismo que `hive` |
 
 > **Nota:** Si el script falla por conexión, espera unos segundos y vuelve a ejecutarlo. Algunos servicios como Hive pueden tardar más en estar completamente listos.
 
-> **Importante:** Este script debe ejecutarse **solo una vez** en el primer arranque, o cada vez que se haga `docker compose down -v` (que elimina los volúmenes y borra los datos).
+> **Importante:** Este script debe ejecutarse **solo una vez** en el primer arranque, o cada vez que se haga `docker compose down -v` (que elimina los volúmenes y borra los datos). Un `docker compose down` sin `-v` conserva los volúmenes y no requiere repetir el post-init.
 
 ### 4. Verificar que el clúster funciona correctamente
 
 ```bash
 # Linux / Mac
-./test-cluster.sh
+./test-cluster.sh hadoop
+./test-cluster.sh hive
+./test-cluster.sh spark
+./test-cluster.sh full   # por defecto si no se pasa argumento
 
 # Windows
-test-cluster.bat
+test-cluster.bat hadoop
+test-cluster.bat hive
+test-cluster.bat spark
+test-cluster.bat full
 ```
 
 Deberías ver al final:
 ```
-RESULTADO: 22/22 tests pasaron
-CLUSTER OPERATIVO AL 100%
+RESULTADO: X/X tests pasaron
+CLUSTER OPERATIVO AL 100% [profile]
 ```
 
 Si algún test falla, consulta la sección de [Solución de Problemas](#solución-de-problemas).
+
+### 5. Cambiar de profile
+
+Para cambiar de un profile a otro siempre usar `docker compose down` primero para eliminar los contenedores existentes:
+
+```bash
+docker compose down
+docker compose --profile spark up -d
+```
+
+> **¿Por qué es necesario el `down`?** Si un contenedor ya existe de una sesión anterior y simplemente se reinicia (sin recrear), puede quedar un archivo PID de Hive u otro estado residual que impide el arranque correcto. El `down` elimina los contenedores (no los volúmenes) y garantiza un arranque limpio.
 
 ---
 
@@ -139,22 +193,27 @@ docker compose down -v
 
 > Usar `down -v` cuando quieras empezar desde cero. Recuerda ejecutar `post-init-cluster` nuevamente después.
 
+| Comando | Contenedores | Volúmenes (datos) | ¿Repetir post-init? |
+|---------|:-----------:|:-----------------:|:-------------------:|
+| `docker compose down` | eliminados | conservados | No |
+| `docker compose down -v` | eliminados | eliminados | Sí |
+
 ---
 
 ## Puertos Expuestos en el Host
 
-| Servicio           | Puerto | URL                        | Credenciales   |
-| ------------------ | ------ | -------------------------- | -------------- |
-| NameNode           | 9870   | http://localhost:9870      | -              |
-| DataNode 1         | 9864   | http://localhost:9864      | -              |
-| DataNode 2         | 9865   | http://localhost:9865      | -              |
-| Hive Web UI        | 10002  | http://localhost:10002     | -              |
-| Hue                | 8888   | http://localhost:8888      | admin / admin  |
-| Spark Master       | 8081   | http://localhost:8081      | -              |
-| Spark Worker 1     | 8082   | http://localhost:8082      | -              |
-| Spark Worker 2     | 8083   | http://localhost:8083      | -              |
-| Jupyter Notebook   | 8084   | http://localhost:8084      | sin token      |
-| Apache Superset    | 8088   | http://localhost:8088      | admin / admin  |
+| Servicio           | Profile   | Puerto | URL                        | Credenciales   |
+| ------------------ | --------- | ------ | -------------------------- | -------------- |
+| NameNode           | todos      | 9870   | http://localhost:9870      | -              |
+| DataNode 1         | todos      | 9864   | http://localhost:9864      | -              |
+| DataNode 2         | todos      | 9865   | http://localhost:9865      | -              |
+| Hive Web UI        | hive, full | 10002  | http://localhost:10002     | -              |
+| Hue                | hive, full | 8888   | http://localhost:8888      | admin / admin  |
+| Spark Master       | spark, full | 8081  | http://localhost:8081      | -              |
+| Spark Worker 1     | spark, full | 8082  | http://localhost:8082      | -              |
+| Spark Worker 2     | spark, full | 8083  | http://localhost:8083      | -              |
+| Jupyter Notebook   | spark, full | 8084  | http://localhost:8084      | sin token      |
+| Apache Superset    | full       | 8088   | http://localhost:8088      | admin / admin  |
 
 ---
 
@@ -333,11 +392,15 @@ TBLPROPERTIES ('skip.header.line.count'='1');
 
 ## Script post-init-cluster
 
-Debe ejecutarse **una sola vez** después del primer `docker compose up`, o cada vez que se eliminen los volúmenes con `docker compose down -v`.
+Debe ejecutarse **una sola vez** después del primer arranque, o cada vez que se eliminen los volúmenes con `docker compose down -v`. Acepta el mismo profile que usaste al levantar el clúster:
+
+```bash
+./post-init-cluster.sh hive   # o hadoop, spark, full
+```
 
 * Crea carpetas en HDFS (`/user/admin`, `/user/hive/warehouse`)
-* Inicializa el metastore de Hive en PostgreSQL
-* Ejecuta migraciones de Hue
+* Inicializa el metastore de Hive en PostgreSQL (solo profiles `hive` y `full`)
+* Ejecuta migraciones de Hue (solo profiles `hive` y `full`)
 
 **Nota:** Si el script falla por conexión, espera unos segundos y vuelve a ejecutarlo.
 
@@ -345,28 +408,27 @@ Debe ejecutarse **una sola vez** después del primer `docker compose up`, o cada
 
 ## Script de Pruebas de Integración
 
-Los scripts `test-cluster.sh` (Linux/Mac) y `test-cluster.bat` (Windows) verifican automáticamente que todos los servicios están operativos y se comunican correctamente entre sí.
+Los scripts `test-cluster.sh` (Linux/Mac) y `test-cluster.bat` (Windows) verifican automáticamente que los servicios del profile activo están operativos y se comunican correctamente entre sí.
 
 ```bash
-./test-cluster.sh
+./test-cluster.sh hive   # o hadoop, spark, full
 ```
 
-Pruebas incluidas:
+Pruebas incluidas por profile:
 
-| Módulo | Qué verifica |
-|---|---|
-| Servicios HTTP | Los 10 servicios responden con HTTP 200/302 |
-| Hadoop / HDFS | DataNodes registrados, escritura y lectura de archivos |
-| Hive | Conexión HiveServer2, CREATE/INSERT/SELECT/DROP completo |
-| PySpark + Spark | Operación distribuida en workers, conectividad con HDFS |
-| Hue | Login, acceso a HDFS, conectividad con HiveServer2 |
-| Superset | Health check, autenticación JWT, driver pyhive disponible |
+| Módulo | hadoop | hive | spark | full |
+|--------|:------:|:----:|:-----:|:----:|
+| Hadoop / HDFS (HTTP + escritura/lectura) | ✓ | ✓ | ✓ | ✓ |
+| Hive (HiveServer2 + CRUD completo) | | ✓ | | ✓ |
+| Hue (login + HDFS + conectividad Hive) | | ✓ | | ✓ |
+| Spark (HTTP + operación distribuida + HDFS) | | | ✓ | ✓ |
+| Superset (health + JWT + pyhive) | | | | ✓ |
 
 Salida esperada:
 ```
 ==================================================
-  RESULTADO: 22/22 tests pasaron
-  CLUSTER OPERATIVO AL 100%
+  RESULTADO: X/X tests pasaron
+  CLUSTER OPERATIVO AL 100% [profile]
 ==================================================
 ```
 
