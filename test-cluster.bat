@@ -11,10 +11,11 @@ echo ==================================================
 echo   PRUEBAS DE INTEGRACION - PROFILE: %PROFILE%
 echo ==================================================
 
-if "%PROFILE%"=="hadoop" goto do_hadoop
-if "%PROFILE%"=="hive"   goto do_hive
-if "%PROFILE%"=="spark"  goto do_spark
-if "%PROFILE%"=="full"   goto do_full
+if "%PROFILE%"=="hadoop"    goto do_hadoop
+if "%PROFILE%"=="hive"      goto do_hive
+if "%PROFILE%"=="spark"     goto do_spark
+if "%PROFILE%"=="streaming" goto do_streaming
+if "%PROFILE%"=="full"      goto do_full
 
 echo.
 echo Profile no reconocido: '%PROFILE%'
@@ -22,10 +23,11 @@ echo.
 echo Uso: test-cluster.bat [profile]
 echo.
 echo Profiles disponibles:
-echo   hadoop  - Prueba Hadoop/HDFS
-echo   hive    - Prueba Hadoop + Hive + Hue
-echo   spark   - Prueba Hadoop + Spark + Jupyter
-echo   full    - Prueba todo el cluster (por defecto)
+echo   hadoop    - Prueba Hadoop/HDFS
+echo   hive      - Prueba Hadoop + Hive + Hue
+echo   spark     - Prueba Hadoop + Spark + Jupyter
+echo   streaming - Prueba Hadoop + Kafka + Flink + PostgreSQL streaming
+echo   full      - Prueba todo el cluster (por defecto)
 goto end
 
 :do_hadoop
@@ -43,12 +45,18 @@ call :test_hadoop
 call :test_spark
 goto summary
 
+:do_streaming
+call :test_hadoop
+call :test_streaming
+goto summary
+
 :do_full
 call :test_hadoop
 call :test_hive
 call :test_hue
 call :test_spark
 call :test_superset
+call :test_streaming
 goto summary
 
 :: ─── FUNCIONES DE PRUEBA ──────────────────────────
@@ -113,6 +121,61 @@ if "!HEALTH!"=="OK" ( call :ok "Health check" ) else ( call :fail "Health check"
 
 for /f %%i in ('docker exec superset bash -c "/app/.venv/bin/python -c \"import pyhive; print('OK')\"" 2^>nul') do set PYHIVE=%%i
 if "!PYHIVE!"=="OK" ( call :ok "pyhive en virtualenv" ) else ( call :fail "pyhive en virtualenv" )
+goto :eof
+
+:test_streaming
+echo.
+echo [ KAFKA ]
+call :check_http 8090 "Kafka UI"
+
+docker exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list 2>nul | find "eventos-tienda" >nul
+if !errorlevel!==0 ( call :ok "Topic eventos-tienda existe" ) else ( call :fail "Topic eventos-tienda no encontrado" )
+
+docker exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list 2>nul | find "metricas-procesadas" >nul
+if !errorlevel!==0 ( call :ok "Topic metricas-procesadas existe" ) else ( call :fail "Topic metricas-procesadas no encontrado" )
+
+echo test-ci | docker exec -i kafka /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server kafka:9092 --topic eventos-tienda >nul 2>&1
+for /f "delims=" %%i in ('docker exec kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka:9092 --topic eventos-tienda --from-beginning --max-messages 1 --timeout-ms 5000 2^>nul') do set KAFKA_MSG=%%i
+if "!KAFKA_MSG!"=="test-ci" ( call :ok "Produce/Consume Kafka" ) else ( call :fail "Produce/Consume Kafka" )
+
+echo.
+echo [ FLINK ]
+call :check_http 8085 "Flink JobManager"
+
+for /f %%i in ('curl -s http://localhost:8085/taskmanagers 2^>nul ^| python -c "import sys,json; print(len(json.load(sys.stdin).get(\"taskmanagers\",[])))" 2^>nul') do set TM=%%i
+if defined TM (
+    if !TM! GEQ 1 ( call :ok "TaskManager registrado (!TM!)" ) else ( call :fail "TaskManager no disponible" )
+) else (
+    call :fail "TaskManager no disponible"
+)
+
+for /f %%i in ('curl -s http://localhost:8085/overview 2^>nul ^| python -c "import sys,json; d=json.load(sys.stdin); print(d.get(\"slots-available\",0))" 2^>nul') do set SLOTS=%%i
+if defined SLOTS (
+    if !SLOTS! GEQ 1 ( call :ok "Slots disponibles: !SLOTS!" ) else ( call :fail "Sin slots disponibles" )
+) else (
+    call :fail "Sin slots disponibles"
+)
+
+echo.
+echo [ POSTGRES STREAMING ]
+docker exec postgres-streaming psql -U flink -d streaming -c "\dt" 2>nul | find "ventas_por_minuto" >nul
+if !errorlevel!==0 ( call :ok "Tabla ventas_por_minuto existe" ) else ( call :fail "Tabla ventas_por_minuto no encontrada" )
+
+docker exec postgres-streaming psql -U flink -d streaming -c "\dt" 2>nul | find "eventos_por_tipo" >nul
+if !errorlevel!==0 ( call :ok "Tabla eventos_por_tipo existe" ) else ( call :fail "Tabla eventos_por_tipo no encontrada" )
+
+echo.
+echo [ GRAFANA ]
+call :check_http 3000 "Grafana"
+
+for /f %%i in ('curl -s http://localhost:3000/api/health 2^>nul ^| python -c "import sys,json; print(json.load(sys.stdin).get(\"database\",\"error\"))" 2^>nul') do set GF_HEALTH=%%i
+if "!GF_HEALTH!"=="ok" ( call :ok "Grafana database: ok" ) else ( call :fail "Grafana database: !GF_HEALTH!" )
+
+for /f %%i in ('curl -s -u admin:admin http://localhost:3000/api/datasources 2^>nul ^| python -c "import sys,json; ds=[d[\"name\"] for d in json.load(sys.stdin)]; print(\"ok\" if \"PostgreSQL-Streaming\" in ds else \"fail\")" 2^>nul') do set GF_DS=%%i
+if "!GF_DS!"=="ok" ( call :ok "Datasource PostgreSQL-Streaming configurado" ) else ( call :fail "Datasource PostgreSQL-Streaming no encontrado" )
+
+for /f %%i in ('curl -s -u admin:admin "http://localhost:3000/api/search?query=Streaming" 2^>nul ^| python -c "import sys,json; results=json.load(sys.stdin); print(\"ok\" if len(results)^>0 else \"fail\")" 2^>nul') do set GF_DASH=%%i
+if "!GF_DASH!"=="ok" ( call :ok "Dashboard Streaming cargado" ) else ( call :fail "Dashboard Streaming no encontrado" )
 goto :eof
 
 :: ─── HELPERS ──────────────────────────────────────

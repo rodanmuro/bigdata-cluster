@@ -1,6 +1,6 @@
 # Guía para Levantar un Clúster Big Data con Docker Compose
 
-Este repositorio contiene un conjunto de servicios orquestados con Docker Compose para levantar un clúster de Big Data compuesto por Hadoop, Hive, Hue, Spark, Jupyter, Superset y PostgreSQL.
+Este repositorio contiene un conjunto de servicios orquestados con Docker Compose para levantar un clúster de Big Data compuesto por Hadoop, Hive, Hue, Spark, Jupyter, Superset, Kafka, Flink y PostgreSQL. Cubre tanto procesamiento **batch** (Hadoop, Hive, Spark) como procesamiento **en tiempo real** (Kafka, Flink).
 
 ---
 
@@ -8,18 +8,43 @@ Este repositorio contiene un conjunto de servicios orquestados con Docker Compos
 
 > **Importante:** Antes de iniciar, asegúrate de tener suficiente espacio disponible en disco.
 
-| Imagen | Tamaño aproximado |
-| ---------------------------------- | ----------------- |
-| `apache/hadoop:3.4.1`              | 2.1 GB            |
-| `gethue/hue:latest`                | 2.6 GB            |
-| `apache/hive:4.0.1`                | 1.6 GB            |
-| `apache/spark:4.1.1`               | 1.3 GB            |
-| `apache/superset:6.1.0rc1`         | 1.0 GB            |
-| `postgres:14`                      | 0.4 GB            |
-| `python-pyspark4-jupyter` (local)  | ~1.1 GB           |
-| **Total estimado**                 | **~10 GB**        |
+| Imagen | Tamaño real |
+| ---------------------------------- | ----------- |
+| `apache/hadoop:3.4.1`              | 2.08 GB     |
+| `gethue/hue:latest`                | 2.6 GB      |
+| `apache/hive:4.0.1`                | 1.6 GB      |
+| `apache/spark:4.1.1`               | 1.3 GB      |
+| `apache/superset:6.1.0rc1`         | 1.0 GB      |
+| `postgres:14`                      | 0.44 GB     |
+| `python-pyspark4-jupyter` (local)  | ~1.1 GB     |
+| `apache/kafka:3.7.0`               | 0.39 GB     |
+| `provectuslabs/kafka-ui:v0.7.2`    | 0.29 GB     |
+| `apache/flink:1.19.0-scala_2.12`   | 0.80 GB     |
+| `grafana/grafana:11.0.0`           | 0.44 GB     |
+| **Total estimado**                 | **~12 GB**  |
 
 > **¿Por qué no se multiplica el espacio?** Docker usa un sistema de capas. Si hay 3 contenedores Spark, la imagen se descarga una sola vez (~1.3 GB), no tres veces. El espacio adicional por contenedor en ejecución es mínimo (unos pocos MB por logs y datos temporales).
+
+---
+
+## Consumo de RAM por Contenedor
+
+Mediciones reales con el profile `streaming` activo (9 contenedores, simulador corriendo):
+
+| Contenedor | RAM en uso |
+| ------------------- | ---------- |
+| `flink-taskmanager` | 605 MB     |
+| `flink-jobmanager`  | 434 MB     |
+| `hadoop-namenode`   | 429 MB     |
+| `kafka`             | 417 MB     |
+| `hadoop-datanode-1` | 300 MB     |
+| `hadoop-datanode-2` | 286 MB     |
+| `kafka-ui`          | 266 MB     |
+| `grafana`           | 76 MB      |
+| `postgres-streaming`| 35 MB      |
+| **Total**           | **~2.85 GB** |
+
+> El profile `streaming` consume ~2.85 GB de RAM reales con todos los jobs de Flink activos y el simulador generando datos. Los profiles con más servicios (Hive, Spark, Superset) elevan este número considerablemente.
 
 ---
 
@@ -27,7 +52,9 @@ Este repositorio contiene un conjunto de servicios orquestados con Docker Compos
 
 * Docker y Docker Compose instalados
 * Mínimo **10 GB** de espacio libre en disco
-* Mínimo **8 GB de RAM** recomendados (el clúster levanta ~13 contenedores simultáneamente)
+* Mínimo **8 GB de RAM** para los profiles `hadoop`, `hive` y `spark`
+* Mínimo **6 GB de RAM** para el profile `streaming` (~2.85 GB medidos en uso real)
+* Mínimo **16 GB de RAM** recomendados para el profile `full` (todos los servicios)
 * Maven (solo si vas a reconstruir los jars de Hive desde fuentes)
 
 ---
@@ -46,6 +73,10 @@ Las versiones están **fijadas intencionalmente** para garantizar compatibilidad
 | PostgreSQL | 14 |
 | Hue | 4.11.0 |
 | Apache Superset | 6.1.0rc1 |
+| Apache Kafka | 3.7.0 |
+| Kafka UI | 0.7.2 |
+| Apache Flink | 1.19.0 |
+| Grafana | 11.0.0 |
 
 > **Regla crítica de compatibilidad:** La versión de PySpark debe coincidir **exactamente** con la versión del clúster Spark, y Python debe ser la misma versión que tienen los workers de Spark. Ver sección de [Problemas de compatibilidad de versiones](#problemas-de-compatibilidad-de-versiones) para más detalles.
 
@@ -60,7 +91,8 @@ El clúster usa **Docker Compose profiles** para permitir levantar solo los serv
 | `hadoop` | NameNode + 2 DataNodes | ~1.5 GB |
 | `hive` | Hadoop + Metastore + HiveServer2 + Hue + PostgreSQL (x2) | ~4 GB |
 | `spark` | Hadoop + Spark Master + 2 Workers + Jupyter | ~4 GB |
-| `full` | Todo lo anterior + Superset | ~8 GB |
+| `streaming` | Hadoop + Kafka + Kafka UI + Flink + PostgreSQL streaming | ~6 GB |
+| `full` | Todo lo anterior + Superset | ~12 GB |
 
 > **Importante:** cada profile es **acumulativo** — el profile `hive` ya incluye Hadoop, no es necesario levantarlo por separado.
 
@@ -84,19 +116,22 @@ Elige el profile según lo que necesites:
 
 ```bash
 # Solo Hadoop/HDFS
-docker compose --profile hadoop up -d
+docker compose --profile hadoop up
 
 # Hadoop + Hive + Hue
-docker compose --profile hive up -d
+docker compose --profile hive up
 
 # Hadoop + Spark + Jupyter
-docker compose --profile spark up -d
+docker compose --profile spark up
+
+# Hadoop + Kafka + Kafka UI
+docker compose --profile streaming up
 
 # Todo el clúster
-docker compose --profile full up -d
+docker compose --profile full up
 ```
 
-> Para el profile `full`, se recomienda **no usar `-d`** (modo detach) para ver los logs en tiempo real. Cuando Superset termine de inicializarse (el servicio más lento), aparecerá el siguiente mensaje en los logs:
+> Cuando Superset termine de inicializarse (el servicio más lento del profile `full`), aparecerá el siguiente mensaje en los logs:
 >
 > ```
 > superset  | ╔══════════════════════════════════════════════════╗
@@ -122,12 +157,14 @@ Una vez los servicios estén corriendo, ejecutar **en otra terminal** pasando el
 ./post-init-cluster.sh hadoop
 ./post-init-cluster.sh hive
 ./post-init-cluster.sh spark
+./post-init-cluster.sh streaming
 ./post-init-cluster.sh full   # por defecto si no se pasa argumento
 
 # Windows
 post-init-cluster.bat hadoop
 post-init-cluster.bat hive
 post-init-cluster.bat spark
+post-init-cluster.bat streaming
 post-init-cluster.bat full
 ```
 
@@ -138,7 +175,8 @@ Lo que hace cada profile:
 | `hadoop` | Crea directorios en HDFS (`/user/admin`, `/user/hive/warehouse`) |
 | `hive` | Lo anterior + inicializa metastore de Hive + migraciones de Hue |
 | `spark` | Crea directorios en HDFS |
-| `full` | Lo mismo que `hive` |
+| `streaming` | Crea directorios en HDFS + crea topics Kafka + descarga JARs de Flink + crea tablas en PostgreSQL + reinicia Flink para cargar JARs + envía jobs SQL automáticamente + espera a que Grafana esté listo |
+| `full` | Todo lo de `hive` + todo lo de `streaming` |
 
 > **Nota:** Si el script falla por conexión, espera unos segundos y vuelve a ejecutarlo. Algunos servicios como Hive pueden tardar más en estar completamente listos.
 
@@ -151,12 +189,14 @@ Lo que hace cada profile:
 ./test-cluster.sh hadoop
 ./test-cluster.sh hive
 ./test-cluster.sh spark
+./test-cluster.sh streaming
 ./test-cluster.sh full   # por defecto si no se pasa argumento
 
 # Windows
 test-cluster.bat hadoop
 test-cluster.bat hive
 test-cluster.bat spark
+test-cluster.bat streaming
 test-cluster.bat full
 ```
 
@@ -174,7 +214,7 @@ Para cambiar de un profile a otro siempre usar `docker compose down` primero par
 
 ```bash
 docker compose down
-docker compose --profile spark up -d
+docker compose --profile spark up
 ```
 
 > **¿Por qué es necesario el `down`?** Si un contenedor ya existe de una sesión anterior y simplemente se reinicia (sin recrear), puede quedar un archivo PID de Hive u otro estado residual que impide el arranque correcto. El `down` elimina los contenedores (no los volúmenes) y garantiza un arranque limpio.
@@ -202,18 +242,23 @@ docker compose down -v
 
 ## Puertos Expuestos en el Host
 
-| Servicio           | Profile   | Puerto | URL                        | Credenciales   |
-| ------------------ | --------- | ------ | -------------------------- | -------------- |
-| NameNode           | todos      | 9870   | http://localhost:9870      | -              |
-| DataNode 1         | todos      | 9864   | http://localhost:9864      | -              |
-| DataNode 2         | todos      | 9865   | http://localhost:9865      | -              |
-| Hive Web UI        | hive, full | 10002  | http://localhost:10002     | -              |
-| Hue                | hive, full | 8888   | http://localhost:8888      | admin / admin  |
-| Spark Master       | spark, full | 8081  | http://localhost:8081      | -              |
-| Spark Worker 1     | spark, full | 8082  | http://localhost:8082      | -              |
-| Spark Worker 2     | spark, full | 8083  | http://localhost:8083      | -              |
-| Jupyter Notebook   | spark, full | 8084  | http://localhost:8084      | sin token      |
-| Apache Superset    | full       | 8088   | http://localhost:8088      | admin / admin  |
+| Servicio           | Profile              | Puerto | URL                        | Credenciales   |
+| ------------------ | -------------------- | ------ | -------------------------- | -------------- |
+| NameNode           | todos                | 9870   | http://localhost:9870      | -              |
+| DataNode 1         | todos                | 9864   | http://localhost:9864      | -              |
+| DataNode 2         | todos                | 9865   | http://localhost:9865      | -              |
+| Hive Web UI        | hive, full           | 10002  | http://localhost:10002     | -              |
+| Hue                | hive, full           | 8888   | http://localhost:8888      | admin / admin  |
+| Spark Master       | spark, full          | 8081   | http://localhost:8081      | -              |
+| Spark Worker 1     | spark, full          | 8082   | http://localhost:8082      | -              |
+| Spark Worker 2     | spark, full          | 8083   | http://localhost:8083      | -              |
+| Jupyter Notebook   | spark, full          | 8084   | http://localhost:8084      | sin token      |
+| Kafka broker       | streaming, full      | 9092   | -                          | -              |
+| Kafka UI           | streaming, full      | 8090   | http://localhost:8090      | -              |
+| Flink JobManager   | streaming, full      | 8085   | http://localhost:8085      | -              |
+| PostgreSQL streaming | streaming, full    | 5545   | -                          | flink / flink  |
+| Grafana            | streaming, full      | 3000   | http://localhost:3000      | admin / admin  |
+| Apache Superset    | full                 | 8088   | http://localhost:8088      | admin / admin  |
 
 ---
 
@@ -230,8 +275,21 @@ bigdata-cluster/
 │   └── hue.ini                # Configuración de Hue (conexión a Hive y PostgreSQL)
 ├── postgres-driver/
 │   └── postgresql-42.7.6.jar  # Driver JDBC para conectar Hive con PostgreSQL
+├── flink-config/
+│   └── flink-conf.yaml        # Configuración de Flink (memoria, checkpointing, slots)
+├── flink-jobs/
+│   ├── ventas_por_minuto.sql  # Job SQL: revenue por producto cada minuto
+│   └── eventos_por_tipo.sql   # Job SQL: conteo de eventos por tipo cada 30s
+├── flink-jars/                # JARs de Flink (descargados por post-init, en .gitignore)
+├── grafana-config/
+│   ├── datasources/
+│   │   └── postgres.yaml      # Conexión automática a PostgreSQL streaming
+│   └── dashboards/
+│       ├── dashboard.yaml     # Configuración del proveedor de dashboards
+│       └── streaming.json     # Dashboard pre-construido de streaming
 ├── docker-compose.yml         # Definición de todos los servicios
 ├── Dockerfile                 # Imagen personalizada PySpark + Jupyter
+├── .gitignore                 # Excluye flink-jars/*.jar del repositorio
 ├── post-init-cluster.sh       # Script de inicialización (Linux/Mac)
 ├── post-init-cluster.bat      # Script de inicialización (Windows)
 ├── test-cluster.sh            # Pruebas de integración (Linux/Mac)
@@ -349,6 +407,148 @@ hive://hive@hive-server:10000/default
 
 > **Nota técnica importante:** Superset corre dentro de un virtualenv en `/app/.venv`. Los drivers de Hive (`pyhive`, `thrift`, `sasl`, `thrift-sasl`) se instalan automáticamente en ese virtualenv al arrancar el contenedor. Si ves el error `Could not load database driver: HiveEngineSpec`, verifica que el contenedor de Superset terminó su inicialización completa (puede tardar varios minutos la primera vez).
 
+### Apache Kafka
+
+* Versión: **3.7.0** en modo **KRaft** (sin ZooKeeper — arquitectura simplificada)
+* Un único broker que actúa también como controlador del clúster
+* `CLUSTER_ID` fijo en el `docker-compose.yml` para garantizar reproducibilidad entre reinicios (un ID aleatorio rompería el estado al hacer `down` y `up`)
+* Topics creados por `post-init-cluster`:
+
+| Topic | Particiones | Descripción |
+|-------|:-----------:|-------------|
+| `eventos-tienda` | 6 | Eventos crudos del simulador (page_view, purchase, etc.) |
+| `metricas-procesadas` | 3 | Resultados del procesamiento (uso futuro con Flink) |
+
+* La creación automática de topics está **desactivada** (`KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"`) — los topics deben crearse explícitamente para que los estudiantes vean el proceso.
+
+### Kafka UI
+
+* Interfaz web para explorar el clúster Kafka sin usar la terminal:
+  * Vista de topics, particiones y offsets
+  * Explorador de mensajes con decodificación JSON
+  * Consumer groups y lag monitoring
+  * Posibilidad de producir mensajes manualmente desde el navegador
+* Sin credenciales — acceso libre en entorno académico
+* Acceso: `http://localhost:8090`
+
+### Apache Flink
+
+* Versión: **1.19.0** (Scala 2.12)
+* Arquitectura: 1 JobManager + 1 TaskManager con 4 slots
+* El JobManager coordina los jobs y gestiona el estado. El TaskManager ejecuta las tareas en paralelo.
+* Checkpointing configurado en HDFS (`/flink/checkpoints`) para tolerancia a fallos — si Flink se reinicia, los jobs retoman desde el último checkpoint sin perder datos.
+* Web UI de **monitoreo**: `http://localhost:8085` — permite ver jobs corriendo, métricas y logs, pero **no ejecutar SQL**.
+
+**¿Cómo se programan los jobs en este clúster?**
+
+Flink soporta varias formas de programarse (Java, Scala, Python/PyFlink), pero en este clúster se usa **Flink SQL** por ser la más legible para estudiantes con conocimientos de SQL.
+
+Los jobs SQL se ejecutan desde la **terminal** usando el SQL Client incluido en la imagen de Flink. No se usa interfaz web para esto — la decisión es intencional para mantener el clúster simple y enfocado en el aprendizaje del pipeline de datos, no en herramientas adicionales.
+
+```bash
+# Abrir el SQL Client interactivo
+docker exec -it flink-jobmanager ./bin/sql-client.sh
+
+# Ejecutar un job SQL desde archivo (forma recomendada)
+docker exec flink-jobmanager ./bin/sql-client.sh -f /opt/flink/jobs/ventas_por_minuto.sql
+```
+
+> **¿Por qué no hay interfaz web para SQL?** Existen herramientas como Apache Zeppelin que permiten ejecutar Flink SQL desde el navegador, pero agregan complejidad de configuración y más de 800 MB adicionales al clúster. Para el objetivo académico de este proyecto — entender el pipeline de streaming — la terminal es suficiente y más transparente.
+
+**JARs adicionales** (descargados automáticamente por `post-init-cluster`):
+
+| JAR | Función |
+|-----|---------|
+| `flink-sql-connector-kafka-3.3.0-1.19.jar` | Leer eventos desde Kafka |
+| `flink-shaded-hadoop-2-uber-2.8.3-10.0.jar` | Escritura de checkpoints en HDFS |
+| `flink-connector-jdbc-3.2.0-1.19.jar` | Escribir resultados en PostgreSQL |
+
+> Los JARs se descargan en `flink-jars/` la primera vez que se ejecuta `post-init-cluster`. En ejecuciones posteriores se verifica si ya existen para no volver a descargarlos. La carpeta está en `.gitignore`.
+
+**Jobs SQL incluidos** en `flink-jobs/`:
+
+| Job | Descripción | Ventana |
+|-----|-------------|---------|
+| `ventas_por_minuto.sql` | Revenue y compras por producto desde Kafka → PostgreSQL | 1 segundo |
+| `eventos_por_tipo.sql` | Conteo de eventos por tipo desde Kafka → PostgreSQL | 1 segundo |
+
+Cada archivo SQL define tres cosas en orden:
+1. **Tabla fuente** — cómo conectarse a Kafka y leer los mensajes
+2. **Tabla destino** — cómo conectarse a PostgreSQL y escribir los resultados
+3. **Job** — la lógica de transformación (filtros, agrupaciones, ventanas de tiempo)
+
+### Grafana
+
+* Versión: **11.0.0**
+* Plataforma de visualización de datos en tiempo real
+* Credenciales: `admin` / `admin`
+* Acceso: `http://localhost:3000`
+
+**Configuración automática por aprovisionamiento** — al arrancar el contenedor, Grafana carga automáticamente desde `grafana-config/`:
+
+| Archivo | Qué configura |
+|---------|--------------|
+| `datasources/postgres.yaml` | Conexión a `postgres-streaming` (sin configuración manual) |
+| `dashboards/dashboard.yaml` | Dónde buscar los archivos de dashboards |
+| `dashboards/streaming.json` | Dashboard pre-construido listo para usar |
+
+**Dashboard incluido: "Clúster Big Data — Streaming en Tiempo Real"**
+
+| Panel | Tipo | Datos |
+|-------|------|-------|
+| Revenue por producto por minuto | Gráfico de líneas | `ventas_por_minuto` |
+| Revenue total acumulado | Stat | `ventas_por_minuto` |
+| Total de compras | Stat | `ventas_por_minuto` |
+| Eventos por tipo | Gráfico de barras | `eventos_por_tipo` |
+| Top productos por revenue | Tabla | `ventas_por_minuto` |
+| Eventos por tipo en el tiempo | Gráfico de líneas | `eventos_por_tipo` |
+
+> El dashboard se refresca automáticamente cada **2 segundos** (configurable hasta 1s desde el selector de Grafana). A medida que el simulador genera eventos y Flink los procesa, los paneles se actualizan en tiempo real sin intervención manual.
+
+### Simulador de Eventos (`simulador.py`)
+
+Script Python incluido en la raíz del proyecto que genera eventos continuos hacia Kafka, simulando el tráfico de una tienda en línea. Está diseñado para mantenerse corriendo indefinidamente hasta que se interrumpa con `Ctrl+C`.
+
+**Eventos generados:**
+
+| Tipo | Probabilidad | Descripción |
+|------|:------------:|-------------|
+| `page_view` | 35 % | Visita a la página de un producto |
+| `purchase` | 30 % | Compra completada |
+| `add_to_cart` | 20 % | Producto agregado al carrito |
+| `cart_abandon` | 10 % | Abandono del carrito |
+| `search` | 5 % | Búsqueda de producto |
+
+Cada evento incluye: `type`, `product_id`, `product`, `category`, `price`, `quantity`, `total`, `user_id` y `timestamp` (ISO 8601). El `user_id` se usa como clave Kafka para que los eventos del mismo usuario siempre vayan a la misma partición.
+
+**Requisito previo (solo la primera vez):**
+
+```bash
+pip install confluent-kafka
+```
+
+**Configurar resolución de hostname de Kafka:**
+
+El simulador corre en el host (fuera de Docker), pero Kafka anuncia su hostname interno `kafka` a los clientes. Es necesario agregar una entrada en `/etc/hosts`:
+
+```bash
+# Linux / Mac — agregar esta línea a /etc/hosts
+echo "127.0.0.1 kafka" | sudo tee -a /etc/hosts
+
+# Windows — editar C:\Windows\System32\drivers\etc\hosts como administrador
+# Agregar la línea:  127.0.0.1  kafka
+```
+
+**Ejecutar el simulador:**
+
+```bash
+python simulador.py
+```
+
+El simulador envía **3 eventos por segundo** por defecto. Mientras esté corriendo, Flink los procesa con ventanas de 1 segundo y escribe los resultados en PostgreSQL. Grafana los visualiza en tiempo real cada 2 segundos.
+
+---
+
 ### Conexión a AWS S3
 
 1. Crear bucket con permisos públicos:
@@ -395,12 +595,18 @@ TBLPROPERTIES ('skip.header.line.count'='1');
 Debe ejecutarse **una sola vez** después del primer arranque, o cada vez que se eliminen los volúmenes con `docker compose down -v`. Acepta el mismo profile que usaste al levantar el clúster:
 
 ```bash
-./post-init-cluster.sh hive   # o hadoop, spark, full
+./post-init-cluster.sh streaming   # o hadoop, hive, spark, full
 ```
 
-* Crea carpetas en HDFS (`/user/admin`, `/user/hive/warehouse`)
-* Inicializa el metastore de Hive en PostgreSQL (solo profiles `hive` y `full`)
-* Ejecuta migraciones de Hue (solo profiles `hive` y `full`)
+Acciones por profile:
+
+| Profile | Qué hace |
+|---------|----------|
+| `hadoop` | Crea carpetas en HDFS (`/user/admin`, `/user/hive/warehouse`) |
+| `hive` | Lo anterior + inicializa metastore de Hive + migraciones de Hue |
+| `spark` | Crea carpetas en HDFS |
+| `streaming` | Crea carpetas en HDFS + topics Kafka + descarga JARs de Flink + tablas PostgreSQL + reinicia Flink + envía jobs SQL + espera Grafana |
+| `full` | Todo `hive` + todo `streaming` |
 
 **Nota:** Si el script falla por conexión, espera unos segundos y vuelve a ejecutarlo.
 
@@ -416,13 +622,18 @@ Los scripts `test-cluster.sh` (Linux/Mac) y `test-cluster.bat` (Windows) verific
 
 Pruebas incluidas por profile:
 
-| Módulo | hadoop | hive | spark | full |
-|--------|:------:|:----:|:-----:|:----:|
-| Hadoop / HDFS (HTTP + escritura/lectura) | ✓ | ✓ | ✓ | ✓ |
-| Hive (HiveServer2 + CRUD completo) | | ✓ | | ✓ |
-| Hue (login + HDFS + conectividad Hive) | | ✓ | | ✓ |
-| Spark (HTTP + operación distribuida + HDFS) | | | ✓ | ✓ |
-| Superset (health + JWT + pyhive) | | | | ✓ |
+| Módulo | hadoop | hive | spark | streaming | full |
+|--------|:------:|:----:|:-----:|:---------:|:----:|
+| Hadoop / HDFS (HTTP + escritura/lectura) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Hive (HiveServer2 + CRUD completo) | | ✓ | | | ✓ |
+| Hue (login + HDFS + conectividad Hive) | | ✓ | | | ✓ |
+| Spark (HTTP + operación distribuida + HDFS) | | | ✓ | | ✓ |
+| Kafka (broker + topics + produce/consume) | | | | ✓ | ✓ |
+| Kafka UI (HTTP) | | | | ✓ | ✓ |
+| Flink (JobManager + TaskManager + slots) | | | | ✓ | ✓ |
+| PostgreSQL streaming (tablas) | | | | ✓ | ✓ |
+| Grafana (health + datasource + dashboard) | | | | ✓ | ✓ |
+| Superset (health + JWT + pyhive) | | | | | ✓ |
 
 Salida esperada:
 ```
@@ -547,6 +758,10 @@ docker compose down && docker compose up
   * [Apache Superset](https://superset.apache.org/)
   * [Apache Spark](https://spark.apache.org/)
   * [PySpark](https://spark.apache.org/docs/latest/api/python/)
+  * [Apache Kafka](https://kafka.apache.org/)
+  * [Apache Flink](https://flink.apache.org/)
+  * [Flink SQL](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/sql/overview/)
+  * [Grafana](https://grafana.com/docs/)
 
 ---
 

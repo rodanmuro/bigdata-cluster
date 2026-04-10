@@ -138,6 +138,54 @@ test_superset() {
     [ "$PYHIVE" = "OK" ] && check ok "pyhive en virtualenv" || check fail "pyhive en virtualenv"
 }
 
+# ─── STREAMING ────────────────────────────────────
+test_streaming() {
+    echo ""
+    echo "[ KAFKA ]"
+
+    check_http 8090 "Kafka UI"
+
+    TOPICS=$(docker exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list 2>/dev/null)
+    echo "$TOPICS" | grep -q "eventos-tienda"     && check ok "Topic eventos-tienda existe"     || check fail "Topic eventos-tienda no encontrado"
+    echo "$TOPICS" | grep -q "metricas-procesadas" && check ok "Topic metricas-procesadas existe" || check fail "Topic metricas-procesadas no encontrado"
+
+    echo "test-ci" | docker exec -i kafka /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server kafka:9092 --topic eventos-tienda > /dev/null 2>&1
+    MSG=$(docker exec kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka:9092 --topic eventos-tienda --from-beginning --max-messages 1 --timeout-ms 5000 2>/dev/null)
+    [ "$MSG" = "test-ci" ] && check ok "Produce/Consume Kafka" || check fail "Produce/Consume Kafka"
+
+    echo ""
+    echo "[ FLINK ]"
+
+    check_http 8085 "Flink JobManager"
+
+    TM=$(curl -s http://localhost:8085/taskmanagers 2>/dev/null | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('taskmanagers', [])))" 2>/dev/null)
+    [ "$TM" -ge 1 ] 2>/dev/null && check ok "TaskManager registrado ($TM)" || check fail "TaskManager no disponible"
+
+    SLOTS=$(curl -s http://localhost:8085/overview 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('slots-available',0))" 2>/dev/null)
+    [ "$SLOTS" -ge 1 ] 2>/dev/null && check ok "Slots disponibles: $SLOTS" || check fail "Sin slots disponibles"
+
+    echo ""
+    echo "[ POSTGRES STREAMING ]"
+
+    TABLES=$(docker exec postgres-streaming psql -U flink -d streaming -c "\dt" 2>/dev/null)
+    echo "$TABLES" | grep -q "ventas_por_minuto"  && check ok "Tabla ventas_por_minuto existe"  || check fail "Tabla ventas_por_minuto no encontrada"
+    echo "$TABLES" | grep -q "eventos_por_tipo"   && check ok "Tabla eventos_por_tipo existe"   || check fail "Tabla eventos_por_tipo no encontrada"
+
+    echo ""
+    echo "[ GRAFANA ]"
+
+    check_http 3000 "Grafana"
+
+    HEALTH=$(curl -s http://localhost:3000/api/health | python3 -c "import sys,json; print(json.load(sys.stdin).get('database','error'))" 2>/dev/null)
+    [ "$HEALTH" = "ok" ] && check ok "Grafana database: ok" || check fail "Grafana database: $HEALTH"
+
+    DS=$(curl -s -u admin:admin http://localhost:3000/api/datasources | python3 -c "import sys,json; ds=[d['name'] for d in json.load(sys.stdin)]; print('ok' if 'PostgreSQL-Streaming' in ds else 'fail')" 2>/dev/null)
+    [ "$DS" = "ok" ] && check ok "Datasource PostgreSQL-Streaming configurado" || check fail "Datasource PostgreSQL-Streaming no encontrado"
+
+    DASH=$(curl -s -u admin:admin "http://localhost:3000/api/search?query=Streaming" | python3 -c "import sys,json; results=json.load(sys.stdin); print('ok' if len(results)>0 else 'fail')" 2>/dev/null)
+    [ "$DASH" = "ok" ] && check ok "Dashboard Streaming cargado" || check fail "Dashboard Streaming no encontrado"
+}
+
 # ─── EJECUCIÓN POR PROFILE ────────────────────────
 
 case "$PROFILE" in
@@ -153,12 +201,17 @@ case "$PROFILE" in
         test_hadoop
         test_spark
         ;;
+    streaming)
+        test_hadoop
+        test_streaming
+        ;;
     full)
         test_hadoop
         test_hive
         test_hue
         test_spark
         test_superset
+        test_streaming
         ;;
     *)
         echo ""
@@ -167,10 +220,11 @@ case "$PROFILE" in
         echo "Uso: ./test-cluster.sh [profile]"
         echo ""
         echo "Profiles disponibles:"
-        echo "  hadoop  - Prueba Hadoop/HDFS"
-        echo "  hive    - Prueba Hadoop + Hive + Hue"
-        echo "  spark   - Prueba Hadoop + Spark + Jupyter"
-        echo "  full    - Prueba todo el clúster (por defecto)"
+        echo "  hadoop    - Prueba Hadoop/HDFS"
+        echo "  hive      - Prueba Hadoop + Hive + Hue"
+        echo "  spark     - Prueba Hadoop + Spark + Jupyter"
+        echo "  streaming - Prueba Hadoop + Kafka + Flink + PostgreSQL streaming"
+        echo "  full      - Prueba todo el clúster (por defecto)"
         exit 1
         ;;
 esac

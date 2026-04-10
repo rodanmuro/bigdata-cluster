@@ -2,7 +2,7 @@ services:
   hadoop-namenode:
     container_name: hadoop-namenode
     image: apache/hadoop:3.4.1
-    profiles: ["hadoop", "hive", "spark", "full"]
+    profiles: ["hadoop", "hive", "spark", "streaming", "full"]
     ports:
     - "9870:9870"
     volumes:
@@ -13,7 +13,7 @@ services:
   hadoop-datanode-1:
     container_name: hadoop-datanode-1
     image: apache/hadoop:3.4.1
-    profiles: ["hadoop", "hive", "spark", "full"]
+    profiles: ["hadoop", "hive", "spark", "streaming", "full"]
     ports:
     - "9864:9864"
     volumes:
@@ -24,7 +24,7 @@ services:
   hadoop-datanode-2:
     container_name: hadoop-datanode-2
     image: apache/hadoop:3.4.1
-    profiles: ["hadoop", "hive", "spark", "full"]
+    profiles: ["hadoop", "hive", "spark", "streaming", "full"]
     ports:
     - "9865:9864"
     volumes:
@@ -149,6 +149,114 @@ services:
     profiles: ["spark", "full"]
     ports:
       - "8084:8888"
+
+  postgres-streaming:
+    image: postgres:14
+    container_name: postgres-streaming
+    profiles: ["streaming", "full"]
+    environment:
+      POSTGRES_DB: streaming
+      POSTGRES_USER: flink
+      POSTGRES_PASSWORD: flink
+    ports:
+      - "5545:5432"
+
+  kafka:
+    image: apache/kafka:3.7.0
+    container_name: kafka
+    profiles: ["streaming", "full"]
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      CLUSTER_ID: "bigdata-cluster-kafka-001"
+    ports:
+      - "9092:9092"
+
+  flink-jobmanager:
+    image: apache/flink:1.19.0-scala_2.12
+    container_name: flink-jobmanager
+    profiles: ["streaming", "full"]
+    command: >
+      bash -c "
+        find /opt/flink/lib/extra -name '*.jar' -exec cp {} /opt/flink/lib/ \; 2>/dev/null || true;
+        /docker-entrypoint.sh jobmanager
+      "
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+    volumes:
+      - ./flink-config/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
+      - ./flink-jars:/opt/flink/lib/extra
+      - ./hadoop-config/core-site.xml:/opt/flink/conf/core-site.xml
+      - ./hadoop-config/hdfs-site.xml:/opt/flink/conf/hdfs-site.xml
+      - ./postgres-driver/postgresql-42.7.6.jar:/opt/flink/lib/postgresql-42.7.6.jar
+      - ./flink-jobs:/opt/flink/jobs
+    ports:
+      - "8085:8081"
+    depends_on:
+      - hadoop-namenode
+      - kafka
+      - postgres-streaming
+
+  flink-taskmanager:
+    image: apache/flink:1.19.0-scala_2.12
+    container_name: flink-taskmanager
+    profiles: ["streaming", "full"]
+    command: >
+      bash -c "
+        find /opt/flink/lib/extra -name '*.jar' -exec cp {} /opt/flink/lib/ \; 2>/dev/null || true;
+        /docker-entrypoint.sh taskmanager
+      "
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+    volumes:
+      - ./flink-config/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
+      - ./flink-jars:/opt/flink/lib/extra
+      - ./hadoop-config/core-site.xml:/opt/flink/conf/core-site.xml
+      - ./hadoop-config/hdfs-site.xml:/opt/flink/conf/hdfs-site.xml
+      - ./postgres-driver/postgresql-42.7.6.jar:/opt/flink/lib/postgresql-42.7.6.jar
+    depends_on:
+      - flink-jobmanager
+
+  grafana:
+    image: grafana/grafana:11.0.0
+    container_name: grafana
+    profiles: ["streaming", "full"]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_DASHBOARDS_MIN_REFRESH_INTERVAL: 1s
+    volumes:
+      - ./grafana-config/datasources:/etc/grafana/provisioning/datasources
+      - ./grafana-config/dashboards:/etc/grafana/provisioning/dashboards
+    ports:
+      - "3000:3000"
+    depends_on:
+      - postgres-streaming
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    container_name: kafka-ui
+    profiles: ["streaming", "full"]
+    environment:
+      KAFKA_CLUSTERS_0_NAME: bigdata-cluster
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    ports:
+      - "8090:8080"
+    depends_on:
+      - kafka
 
   superset:
     image: apache/superset:6.1.0rc1

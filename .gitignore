@@ -1,0 +1,2 @@
+# JARs de Flink — se descargan automáticamente con post-init-cluster
+flink-jars/*.jar
