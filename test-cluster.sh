@@ -161,8 +161,8 @@ test_streaming() {
     TM=$(curl -s http://localhost:8085/taskmanagers 2>/dev/null | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('taskmanagers', [])))" 2>/dev/null)
     [ "$TM" -ge 1 ] 2>/dev/null && check ok "TaskManager registrado ($TM)" || check fail "TaskManager no disponible"
 
-    SLOTS=$(curl -s http://localhost:8085/overview 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('slots-available',0))" 2>/dev/null)
-    [ "$SLOTS" -ge 1 ] 2>/dev/null && check ok "Slots disponibles: $SLOTS" || check fail "Sin slots disponibles"
+    JOBS=$(curl -s http://localhost:8085/jobs 2>/dev/null | python3 -c "import sys,json; jobs=json.load(sys.stdin).get('jobs',[]); print(sum(1 for j in jobs if j['status']=='RUNNING'))" 2>/dev/null)
+    [ "$JOBS" -ge 1 ] 2>/dev/null && check ok "Jobs corriendo: $JOBS" || check fail "Sin jobs en ejecución"
 
     echo ""
     echo "[ POSTGRES STREAMING ]"

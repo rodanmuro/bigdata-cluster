@@ -149,11 +149,11 @@ if defined TM (
     call :fail "TaskManager no disponible"
 )
 
-for /f %%i in ('curl -s http://localhost:8085/overview 2^>nul ^| python -c "import sys,json; d=json.load(sys.stdin); print(d.get(\"slots-available\",0))" 2^>nul') do set SLOTS=%%i
-if defined SLOTS (
-    if !SLOTS! GEQ 1 ( call :ok "Slots disponibles: !SLOTS!" ) else ( call :fail "Sin slots disponibles" )
+for /f %%i in ('curl -s http://localhost:8085/jobs 2^>nul ^| python -c "import sys,json; jobs=json.load(sys.stdin).get(\"jobs\",[]); print(sum(1 for j in jobs if j[\"status\"]==\"RUNNING\"))" 2^>nul') do set JOBS=%%i
+if defined JOBS (
+    if !JOBS! GEQ 1 ( call :ok "Jobs corriendo: !JOBS!" ) else ( call :fail "Sin jobs en ejecucion" )
 ) else (
-    call :fail "Sin slots disponibles"
+    call :fail "Sin jobs en ejecucion"
 )
 
 echo.
