@@ -286,25 +286,41 @@ stop-cluster.bat -v     # apaga y elimina todos los datos
 
 ### Eliminar todo rastro del clúster del sistema
 
-Si quieres liberar completamente el espacio en disco (imágenes, volúmenes, caché de build):
+**Si quieres eliminar todo — imágenes, volúmenes, datos y caché (~17 GB liberados):**
 
 ```bash
-# 1. Bajar el clúster y eliminar volúmenes
+# 1. Bajar el clúster eliminando volúmenes
 ./stop-cluster.sh -v
 
-# 2. Eliminar todas las imágenes del clúster
+# 2. Eliminar todas las imágenes
 docker rmi apache/hadoop:3.4.1 apache/hive:4.0.1 apache/spark:4.1.1 \
            apache/kafka:3.7.0 apache/flink:1.19.0-scala_2.12 \
            provectuslabs/kafka-ui:v0.7.2 grafana/grafana:11.0.0 \
            gethue/hue:latest apache/superset:6.1.0rc1 \
            postgres:14 python:3.11-slim python-pyspark4-jupyter
 
-# 3. Eliminar volúmenes huérfanos y caché de build
+# 3. Limpiar caché de build y volúmenes huérfanos
 docker volume prune -f
 docker builder prune -f
 ```
 
-> Después de esto el sistema queda como si nunca se hubiera instalado el clúster. Para volver a usarlo hay que descargar las imágenes nuevamente (~12 GB).
+> El sistema queda como si nunca se hubiera instalado. Para volver a usarlo hay que descargar las imágenes nuevamente (~12 GB).
+
+**Si quieres eliminar las imágenes pero conservar los datos (volúmenes):**
+
+```bash
+# 1. Bajar el clúster conservando volúmenes
+./stop-cluster.sh
+
+# 2. Eliminar las imágenes
+docker rmi apache/hadoop:3.4.1 apache/hive:4.0.1 apache/spark:4.1.1 \
+           apache/kafka:3.7.0 apache/flink:1.19.0-scala_2.12 \
+           provectuslabs/kafka-ui:v0.7.2 grafana/grafana:11.0.0 \
+           gethue/hue:latest apache/superset:6.1.0rc1 \
+           postgres:14 python:3.11-slim python-pyspark4-jupyter
+```
+
+> Los datos de HDFS y PostgreSQL se conservan en los volúmenes Docker. Cuando vuelvas a levantar el clúster, no será necesario ejecutar `post-init-cluster` de nuevo.
 
 ---
 
