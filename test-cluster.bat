@@ -164,6 +164,22 @@ if !errorlevel!==0 ( call :ok "Tabla ventas_por_minuto existe" ) else ( call :fa
 docker exec postgres-streaming psql -U flink -d streaming -c "\dt" 2>nul | find "eventos_por_tipo" >nul
 if !errorlevel!==0 ( call :ok "Tabla eventos_por_tipo existe" ) else ( call :fail "Tabla eventos_por_tipo no encontrada" )
 
+docker exec postgres-streaming psql -U flink -d streaming -c "\dt" 2>nul | find "actividad_productos" >nul
+if !errorlevel!==0 ( call :ok "Tabla actividad_productos existe" ) else ( call :fail "Tabla actividad_productos no encontrada" )
+
+docker exec postgres-streaming psql -U flink -d streaming -c "\dt" 2>nul | find "sesiones_navegadores" >nul
+if !errorlevel!==0 ( call :ok "Tabla sesiones_navegadores existe" ) else ( call :fail "Tabla sesiones_navegadores no encontrada" )
+
+echo.
+echo [ TIENDA WEB ]
+call :check_http 8091 "Tienda Web"
+
+for /f %%i in ('curl -s http://localhost:8091/ 2^>nul ^| find /c "TiendaStream"') do set TIENDA=%%i
+if !TIENDA! GEQ 1 ( call :ok "Pagina principal cargada" ) else ( call :fail "Pagina principal no disponible" )
+
+for /f %%i in ('curl -s -X POST http://localhost:8091/api/evento -H "Content-Type: application/json" -d "{\"type\":\"page_view\",\"product_id\":\"\",\"product\":\"\",\"category\":\"\",\"price\":0,\"quantity\":0,\"total\":0,\"user_id\":\"test-ci\",\"browser\":\"test\",\"os\":\"test\"}" 2^>nul ^| python -c "import sys,json; print(json.load(sys.stdin).get(\"ok\",False))" 2^>nul') do set API=%%i
+if "!API!"=="True" ( call :ok "API /api/evento responde" ) else ( call :fail "API /api/evento no responde" )
+
 echo.
 echo [ GRAFANA ]
 call :check_http 3000 "Grafana"

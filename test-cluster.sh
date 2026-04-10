@@ -168,8 +168,24 @@ test_streaming() {
     echo "[ POSTGRES STREAMING ]"
 
     TABLES=$(docker exec postgres-streaming psql -U flink -d streaming -c "\dt" 2>/dev/null)
-    echo "$TABLES" | grep -q "ventas_por_minuto"  && check ok "Tabla ventas_por_minuto existe"  || check fail "Tabla ventas_por_minuto no encontrada"
-    echo "$TABLES" | grep -q "eventos_por_tipo"   && check ok "Tabla eventos_por_tipo existe"   || check fail "Tabla eventos_por_tipo no encontrada"
+    echo "$TABLES" | grep -q "ventas_por_minuto"     && check ok "Tabla ventas_por_minuto existe"     || check fail "Tabla ventas_por_minuto no encontrada"
+    echo "$TABLES" | grep -q "eventos_por_tipo"      && check ok "Tabla eventos_por_tipo existe"      || check fail "Tabla eventos_por_tipo no encontrada"
+    echo "$TABLES" | grep -q "actividad_productos"   && check ok "Tabla actividad_productos existe"   || check fail "Tabla actividad_productos no encontrada"
+    echo "$TABLES" | grep -q "sesiones_navegadores"  && check ok "Tabla sesiones_navegadores existe"  || check fail "Tabla sesiones_navegadores no encontrada"
+
+    echo ""
+    echo "[ TIENDA WEB ]"
+
+    check_http 8091 "Tienda Web"
+
+    TIENDA=$(curl -s http://localhost:8091/ 2>/dev/null | grep -c "TiendaStream")
+    [ "$TIENDA" -ge 1 ] 2>/dev/null && check ok "Página principal cargada" || check fail "Página principal no disponible"
+
+    API=$(curl -s -X POST http://localhost:8091/api/evento \
+        -H "Content-Type: application/json" \
+        -d '{"type":"page_view","product_id":"","product":"","category":"","price":0,"quantity":0,"total":0,"user_id":"test-ci","browser":"test","os":"test"}' \
+        2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('ok','false'))" 2>/dev/null)
+    [ "$API" = "True" ] && check ok "API /api/evento responde" || check fail "API /api/evento no responde"
 
     echo ""
     echo "[ GRAFANA ]"

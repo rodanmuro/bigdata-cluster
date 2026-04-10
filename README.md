@@ -10,19 +10,19 @@ Este repositorio contiene un conjunto de servicios orquestados con Docker Compos
 
 | Imagen | Tamaño real |
 | ---------------------------------- | ----------- |
+| `gethue/hue:latest`                | 2.61 GB     |
 | `apache/hadoop:3.4.1`              | 2.08 GB     |
-| `gethue/hue:latest`                | 2.6 GB      |
-| `apache/hive:4.0.1`                | 1.6 GB      |
-| `apache/spark:4.1.1`               | 1.3 GB      |
-| `apache/superset:6.1.0rc1`         | 1.0 GB      |
+| `apache/hive:4.0.1`                | 1.60 GB     |
+| `apache/spark:4.1.1`               | 1.33 GB     |
+| `python-pyspark4-jupyter` (local)  | 1.11 GB     |
+| `apache/superset:6.1.0rc1`         | 0.87 GB     |
+| `apache/flink:1.19.0-scala_2.12`   | 0.80 GB     |
 | `postgres:14`                      | 0.44 GB     |
-| `python-pyspark4-jupyter` (local)  | ~1.1 GB     |
+| `grafana/grafana:11.0.0`           | 0.44 GB     |
 | `apache/kafka:3.7.0`               | 0.39 GB     |
 | `provectuslabs/kafka-ui:v0.7.2`    | 0.29 GB     |
-| `apache/flink:1.19.0-scala_2.12`   | 0.80 GB     |
-| `grafana/grafana:11.0.0`           | 0.44 GB     |
-| `python:3.11-slim` (tienda web)    | ~0.18 GB    |
-| **Total estimado**                 | **~12 GB**  |
+| `python:3.11-slim` (tienda web)    | 0.12 GB     |
+| **Total**                          | **~12 GB**  |
 
 > **¿Por qué no se multiplica el espacio?** Docker usa un sistema de capas. Si hay 3 contenedores Spark, la imagen se descarga una sola vez (~1.3 GB), no tres veces. El espacio adicional por contenedor en ejecución es mínimo (unos pocos MB por logs y datos temporales).
 
@@ -46,7 +46,35 @@ Mediciones reales con el profile `streaming` activo (10 contenedores, 4 jobs de 
 | `tienda-web`        | 38 MB      |
 | **Total**           | **~3.01 GB** |
 
-> El profile `streaming` consume ~3 GB de RAM reales con los 4 jobs de Flink activos y la tienda web corriendo. Los profiles con más servicios (Hive, Spark, Superset) elevan este número considerablemente.
+> El profile `streaming` consume ~3 GB de RAM reales con los 4 jobs de Flink activos y la tienda web corriendo.
+
+Mediciones reales con el profile `full` activo (20 contenedores):
+
+| Contenedor | RAM en uso |
+| -------------------------- | ---------- |
+| `hive-server`              | 768 MB     |
+| `metastore`                | 568 MB     |
+| `flink-taskmanager`        | 554 MB     |
+| `superset`                 | 536 MB     |
+| `flink-jobmanager`         | 441 MB     |
+| `hadoop-namenode`          | 437 MB     |
+| `hue`                      | 336 MB     |
+| `kafka`                    | 337 MB     |
+| `hadoop-datanode-2`        | 309 MB     |
+| `hadoop-datanode-1`        | 307 MB     |
+| `kafka-ui`                 | 280 MB     |
+| `spark-master`             | 218 MB     |
+| `spark-worker-1`           | 217 MB     |
+| `spark-worker-2`           | 214 MB     |
+| `grafana`                  | 78 MB      |
+| `postgres-metastore`       | 74 MB      |
+| `tienda-web`               | 45 MB      |
+| `postgres-hue`             | 36 MB      |
+| `postgres-streaming`       | 28 MB      |
+| `python-pyspark4-jupyter`  | 130 MB     |
+| **Total**                  | **~5.9 GB** |
+
+> El profile `full` consume ~5.9 GB de RAM reales con todos los servicios activos.
 
 ---
 
@@ -55,8 +83,8 @@ Mediciones reales con el profile `streaming` activo (10 contenedores, 4 jobs de 
 * Docker y Docker Compose instalados
 * Mínimo **10 GB** de espacio libre en disco
 * Mínimo **8 GB de RAM** para los profiles `hadoop`, `hive` y `spark`
-* Mínimo **6 GB de RAM** para el profile `streaming` (~2.85 GB medidos en uso real)
-* Mínimo **16 GB de RAM** recomendados para el profile `full` (todos los servicios)
+* Mínimo **6 GB de RAM** para el profile `streaming` (~3 GB medidos en uso real)
+* Mínimo **8 GB de RAM** para el profile `full` (~5.9 GB medidos en uso real)
 * Maven (solo si vas a reconstruir los jars de Hive desde fuentes)
 
 ---
@@ -90,13 +118,13 @@ Las versiones están **fijadas intencionalmente** para garantizar compatibilidad
 
 El clúster usa **Docker Compose profiles** para permitir levantar solo los servicios que necesitas. Esto ahorra RAM y tiempo de arranque, y es útil para aprender cada componente de forma progresiva.
 
-| Profile | Servicios incluidos | RAM aprox. |
+| Profile | Servicios incluidos | RAM medida |
 |---------|--------------------|-----------:|
 | `hadoop` | NameNode + 2 DataNodes | ~1.5 GB |
 | `hive` | Hadoop + Metastore + HiveServer2 + Hue + PostgreSQL (x2) | ~4 GB |
 | `spark` | Hadoop + Spark Master + 2 Workers + Jupyter | ~4 GB |
-| `streaming` | Hadoop + Kafka + Kafka UI + Flink + PostgreSQL streaming | ~6 GB |
-| `full` | Todo lo anterior + Superset | ~12 GB |
+| `streaming` | Hadoop + Kafka + Kafka UI + Flink + PostgreSQL + Grafana + Tienda Web | ~3 GB |
+| `full` | Todo lo anterior + Superset | ~5.9 GB |
 
 > **Importante:** cada profile es **acumulativo** — el profile `hive` ya incluye Hadoop, no es necesario levantarlo por separado.
 
@@ -705,9 +733,10 @@ Pruebas incluidas por profile:
 | Kafka (broker + topics + produce/consume) | | | | ✓ | ✓ |
 | Kafka UI (HTTP) | | | | ✓ | ✓ |
 | Flink (JobManager + TaskManager + slots) | | | | ✓ | ✓ |
-| PostgreSQL streaming (tablas) | | | | ✓ | ✓ |
+| PostgreSQL streaming (4 tablas) | | | | ✓ | ✓ |
+| Tienda Web (HTTP + API /api/evento) | | | | ✓ | ✓ |
 | Grafana (health + datasource + dashboard) | | | | ✓ | ✓ |
-| Superset (health + JWT + pyhive) | | | | | ✓ |
+| Superset (health + pyhive) | | | | | ✓ |
 
 Salida esperada:
 ```
