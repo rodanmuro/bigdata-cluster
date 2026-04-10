@@ -284,6 +284,28 @@ stop-cluster.bat -v     # apaga y elimina todos los datos
 | `./stop-cluster.sh` | eliminados | conservados | No |
 | `./stop-cluster.sh -v` | eliminados | eliminados | Sí |
 
+### Eliminar todo rastro del clúster del sistema
+
+Si quieres liberar completamente el espacio en disco (imágenes, volúmenes, caché de build):
+
+```bash
+# 1. Bajar el clúster y eliminar volúmenes
+./stop-cluster.sh -v
+
+# 2. Eliminar todas las imágenes del clúster
+docker rmi apache/hadoop:3.4.1 apache/hive:4.0.1 apache/spark:4.1.1 \
+           apache/kafka:3.7.0 apache/flink:1.19.0-scala_2.12 \
+           provectuslabs/kafka-ui:v0.7.2 grafana/grafana:11.0.0 \
+           gethue/hue:latest apache/superset:6.1.0rc1 \
+           postgres:14 python:3.11-slim python-pyspark4-jupyter
+
+# 3. Eliminar volúmenes huérfanos y caché de build
+docker volume prune -f
+docker builder prune -f
+```
+
+> Después de esto el sistema queda como si nunca se hubiera instalado el clúster. Para volver a usarlo hay que descargar las imágenes nuevamente (~12 GB).
+
 ---
 
 ## Puertos Expuestos en el Host
