@@ -24,6 +24,16 @@ Este repositorio contiene un conjunto de servicios orquestados con Docker Compos
 | `python:3.11-slim` (tienda web)    | 0.12 GB     |
 | **Total**                          | **~12 GB**  |
 
+Uso total en disco con el profile `full` activo (medido con `docker system df`):
+
+| Concepto | Tamaño |
+|----------|-------:|
+| Imágenes | 11.92 GB |
+| Contenedores (logs + capas de escritura) | 1.95 GB |
+| Volúmenes (HDFS, PostgreSQL, datos) | 2.43 GB |
+| Build cache (imagen Jupyter) | 0.98 GB |
+| **Total** | **~17.3 GB** |
+
 > **¿Por qué no se multiplica el espacio?** Docker usa un sistema de capas. Si hay 3 contenedores Spark, la imagen se descarga una sola vez (~1.3 GB), no tres veces. El espacio adicional por contenedor en ejecución es mínimo (unos pocos MB por logs y datos temporales).
 
 ---
