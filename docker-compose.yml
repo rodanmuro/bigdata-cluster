@@ -229,6 +229,19 @@ services:
     depends_on:
       - flink-jobmanager
 
+  tienda-web:
+    image: python:3.11-slim
+    container_name: tienda-web
+    profiles: ["streaming", "full"]
+    ports:
+      - "8091:8091"
+    volumes:
+      - ./tienda-web:/app
+    working_dir: /app
+    command: bash -c "pip install -r requirements.txt -q && uvicorn main:app --host 0.0.0.0 --port 8091"
+    depends_on:
+      - kafka
+
   grafana:
     image: grafana/grafana:11.0.0
     container_name: grafana

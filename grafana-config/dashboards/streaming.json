@@ -168,6 +168,138 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "id": 7,
+      "title": "Funnel de Conversión",
+      "description": "Solo disponible con datos de la tienda web (no del simulador)",
+      "type": "barchart",
+      "gridPos": { "x": 0, "y": 24, "w": 12, "h": 8 },
+      "datasource": { "type": "postgres", "uid": "postgres-streaming" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "fillOpacity": 80 }
+        }
+      },
+      "options": {
+        "xField": "tipo",
+        "orientation": "auto",
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "postgres-streaming" },
+          "rawSql": "SELECT tipo, SUM(total_eventos) AS total FROM eventos_por_tipo WHERE tipo IN ('page_view','product_hover','add_to_cart','purchase') GROUP BY tipo ORDER BY total DESC",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Top Productos más Visitados (Hover)",
+      "description": "Solo disponible con datos de la tienda web (no del simulador)",
+      "type": "barchart",
+      "gridPos": { "x": 12, "y": 24, "w": 12, "h": 8 },
+      "datasource": { "type": "postgres", "uid": "postgres-streaming" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "fillOpacity": 80 }
+        }
+      },
+      "options": {
+        "xField": "producto",
+        "orientation": "auto",
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "postgres-streaming" },
+          "rawSql": "SELECT product AS producto, SUM(total) AS vistas FROM actividad_productos WHERE tipo = 'product_hover' GROUP BY product ORDER BY vistas DESC LIMIT 8",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Navegadores",
+      "description": "Solo disponible con datos de la tienda web (no del simulador)",
+      "type": "barchart",
+      "gridPos": { "x": 0, "y": 32, "w": 8, "h": 8 },
+      "datasource": { "type": "postgres", "uid": "postgres-streaming" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "fillOpacity": 80 }
+        }
+      },
+      "options": {
+        "xField": "browser",
+        "orientation": "auto",
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "postgres-streaming" },
+          "rawSql": "SELECT browser, SUM(total_eventos) AS total FROM sesiones_navegadores GROUP BY browser ORDER BY total DESC",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Sistemas Operativos",
+      "description": "Solo disponible con datos de la tienda web (no del simulador)",
+      "type": "barchart",
+      "gridPos": { "x": 8, "y": 32, "w": 8, "h": 8 },
+      "datasource": { "type": "postgres", "uid": "postgres-streaming" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "fillOpacity": 80 }
+        }
+      },
+      "options": {
+        "xField": "os",
+        "orientation": "auto",
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "postgres-streaming" },
+          "rawSql": "SELECT os, SUM(total_eventos) AS total FROM sesiones_navegadores GROUP BY os ORDER BY total DESC",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Estudiantes Conectados",
+      "description": "IP, browser y OS de cada estudiante. Solo disponible con datos de la tienda web.",
+      "type": "table",
+      "gridPos": { "x": 16, "y": 32, "w": 8, "h": 8 },
+      "datasource": { "type": "postgres", "uid": "postgres-streaming" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" } }
+      },
+      "options": { "sortBy": [{ "displayName": "total", "desc": true }] },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "postgres-streaming" },
+          "rawSql": "SELECT ip, browser, os, SUM(total_eventos) AS total FROM sesiones_navegadores GROUP BY ip, browser, os ORDER BY total DESC",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
     }
   ]
 }

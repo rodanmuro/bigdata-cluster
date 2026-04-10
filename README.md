@@ -21,6 +21,7 @@ Este repositorio contiene un conjunto de servicios orquestados con Docker Compos
 | `provectuslabs/kafka-ui:v0.7.2`    | 0.29 GB     |
 | `apache/flink:1.19.0-scala_2.12`   | 0.80 GB     |
 | `grafana/grafana:11.0.0`           | 0.44 GB     |
+| `python:3.11-slim` (tienda web)    | ~0.18 GB    |
 | **Total estimado**                 | **~12 GB**  |
 
 > **¿Por qué no se multiplica el espacio?** Docker usa un sistema de capas. Si hay 3 contenedores Spark, la imagen se descarga una sola vez (~1.3 GB), no tres veces. El espacio adicional por contenedor en ejecución es mínimo (unos pocos MB por logs y datos temporales).
@@ -29,22 +30,23 @@ Este repositorio contiene un conjunto de servicios orquestados con Docker Compos
 
 ## Consumo de RAM por Contenedor
 
-Mediciones reales con el profile `streaming` activo (9 contenedores, simulador corriendo):
+Mediciones reales con el profile `streaming` activo (10 contenedores, 4 jobs de Flink corriendo, tienda web activa):
 
 | Contenedor | RAM en uso |
 | ------------------- | ---------- |
-| `flink-taskmanager` | 605 MB     |
-| `flink-jobmanager`  | 434 MB     |
-| `hadoop-namenode`   | 429 MB     |
-| `kafka`             | 417 MB     |
-| `hadoop-datanode-1` | 300 MB     |
-| `hadoop-datanode-2` | 286 MB     |
-| `kafka-ui`          | 266 MB     |
-| `grafana`           | 76 MB      |
-| `postgres-streaming`| 35 MB      |
-| **Total**           | **~2.85 GB** |
+| `flink-taskmanager` | 615 MB     |
+| `flink-jobmanager`  | 547 MB     |
+| `kafka`             | 411 MB     |
+| `hadoop-namenode`   | 389 MB     |
+| `hadoop-datanode-1` | 317 MB     |
+| `kafka-ui`          | 307 MB     |
+| `hadoop-datanode-2` | 278 MB     |
+| `grafana`           | 75 MB      |
+| `postgres-streaming`| 38 MB      |
+| `tienda-web`        | 38 MB      |
+| **Total**           | **~3.01 GB** |
 
-> El profile `streaming` consume ~2.85 GB de RAM reales con todos los jobs de Flink activos y el simulador generando datos. Los profiles con más servicios (Hive, Spark, Superset) elevan este número considerablemente.
+> El profile `streaming` consume ~3 GB de RAM reales con los 4 jobs de Flink activos y la tienda web corriendo. Los profiles con más servicios (Hive, Spark, Superset) elevan este número considerablemente.
 
 ---
 
@@ -77,6 +79,8 @@ Las versiones están **fijadas intencionalmente** para garantizar compatibilidad
 | Kafka UI | 0.7.2 |
 | Apache Flink | 1.19.0 |
 | Grafana | 11.0.0 |
+| Tienda Web (FastAPI) | 0.115.0 |
+| Python (tienda web) | 3.11 |
 
 > **Regla crítica de compatibilidad:** La versión de PySpark debe coincidir **exactamente** con la versión del clúster Spark, y Python debe ser la misma versión que tienen los workers de Spark. Ver sección de [Problemas de compatibilidad de versiones](#problemas-de-compatibilidad-de-versiones) para más detalles.
 
@@ -213,7 +217,7 @@ Si algún test falla, consulta la sección de [Solución de Problemas](#solució
 Para cambiar de un profile a otro siempre usar `docker compose down` primero para eliminar los contenedores existentes:
 
 ```bash
-docker compose down
+./stop-cluster.sh
 docker compose --profile spark up
 ```
 
@@ -223,20 +227,24 @@ docker compose --profile spark up
 
 ## Apagar el Clúster
 
-```bash
-# Apagar conservando los datos (recomendado)
-docker compose down
+Usar siempre los scripts `stop-cluster` — funcionan sin importar con qué profile se levantó el clúster:
 
-# Apagar eliminando todos los datos (HDFS, metastore, Hue BD)
-docker compose down -v
+```bash
+# Linux / Mac
+./stop-cluster.sh       # apaga conservando los datos
+./stop-cluster.sh -v    # apaga y elimina todos los datos
+
+# Windows
+stop-cluster.bat        # apaga conservando los datos
+stop-cluster.bat -v     # apaga y elimina todos los datos
 ```
 
-> Usar `down -v` cuando quieras empezar desde cero. Recuerda ejecutar `post-init-cluster` nuevamente después.
+> **¿Por qué un script y no `docker compose down` directamente?** Los servicios tienen profiles definidos, y `docker compose down` sin especificar el profile correcto no encuentra los contenedores y sale silenciosamente sin hacer nada. El script usa `--profile full` internamente, que cubre todos los servicios sin excepción.
 
 | Comando | Contenedores | Volúmenes (datos) | ¿Repetir post-init? |
 |---------|:-----------:|:-----------------:|:-------------------:|
-| `docker compose down` | eliminados | conservados | No |
-| `docker compose down -v` | eliminados | eliminados | Sí |
+| `./stop-cluster.sh` | eliminados | conservados | No |
+| `./stop-cluster.sh -v` | eliminados | eliminados | Sí |
 
 ---
 
@@ -258,6 +266,7 @@ docker compose down -v
 | Flink JobManager   | streaming, full      | 8085   | http://localhost:8085      | -              |
 | PostgreSQL streaming | streaming, full    | 5545   | -                          | flink / flink  |
 | Grafana            | streaming, full      | 3000   | http://localhost:3000      | admin / admin  |
+| Tienda Web         | streaming, full      | 8091   | http://localhost:8091      | -              |
 | Apache Superset    | full                 | 8088   | http://localhost:8088      | admin / admin  |
 
 ---
@@ -278,8 +287,10 @@ bigdata-cluster/
 ├── flink-config/
 │   └── flink-conf.yaml        # Configuración de Flink (memoria, checkpointing, slots)
 ├── flink-jobs/
-│   ├── ventas_por_minuto.sql  # Job SQL: revenue por producto cada minuto
-│   └── eventos_por_tipo.sql   # Job SQL: conteo de eventos por tipo cada 30s
+│   ├── ventas_por_minuto.sql      # Job SQL: revenue por producto (simulador + tienda)
+│   ├── eventos_por_tipo.sql       # Job SQL: conteo de todos los tipos de evento
+│   ├── actividad_productos.sql    # Job SQL: hover/carrito/compra por producto (solo tienda)
+│   └── sesiones_navegadores.sql   # Job SQL: IP, browser y OS por sesión (solo tienda)
 ├── flink-jars/                # JARs de Flink (descargados por post-init, en .gitignore)
 ├── grafana-config/
 │   ├── datasources/
@@ -287,13 +298,21 @@ bigdata-cluster/
 │   └── dashboards/
 │       ├── dashboard.yaml     # Configuración del proveedor de dashboards
 │       └── streaming.json     # Dashboard pre-construido de streaming
+├── tienda-web/
+│   ├── requirements.txt       # Dependencias Python (fastapi, uvicorn, confluent-kafka)
+│   ├── main.py                # API FastAPI: POST /api/evento → Kafka
+│   └── static/
+│       └── index.html         # Tienda online (HTML + CSS + JS embebidos)
 ├── docker-compose.yml         # Definición de todos los servicios
 ├── Dockerfile                 # Imagen personalizada PySpark + Jupyter
 ├── .gitignore                 # Excluye flink-jars/*.jar del repositorio
 ├── post-init-cluster.sh       # Script de inicialización (Linux/Mac)
 ├── post-init-cluster.bat      # Script de inicialización (Windows)
+├── stop-cluster.sh            # Script de apagado seguro (Linux/Mac)
+├── stop-cluster.bat           # Script de apagado seguro (Windows)
 ├── test-cluster.sh            # Pruebas de integración (Linux/Mac)
 ├── test-cluster.bat           # Pruebas de integración (Windows)
+├── simulador.py               # Generador de eventos de fondo para Kafka
 ├── superset_config.py         # Configuración adicional de Superset
 └── README.md
 ```
@@ -467,15 +486,21 @@ docker exec flink-jobmanager ./bin/sql-client.sh -f /opt/flink/jobs/ventas_por_m
 
 **Jobs SQL incluidos** en `flink-jobs/`:
 
-| Job | Descripción | Ventana |
-|-----|-------------|---------|
-| `ventas_por_minuto.sql` | Revenue y compras por producto desde Kafka → PostgreSQL | 1 segundo |
-| `eventos_por_tipo.sql` | Conteo de eventos por tipo desde Kafka → PostgreSQL | 1 segundo |
+| Job | Fuente de datos | Descripción | Ventana |
+|-----|----------------|-------------|---------|
+| `ventas_por_minuto.sql` | Simulador + tienda | Revenue y compras por producto | 1 segundo |
+| `eventos_por_tipo.sql` | Simulador + tienda | Conteo de todos los tipos de evento | 1 segundo |
+| `actividad_productos.sql` | Solo tienda web | Hover, add_to_cart y purchase por producto | 1 segundo |
+| `sesiones_navegadores.sql` | Solo tienda web | IP, browser y OS por sesión | 1 segundo |
+
+Los jobs de la tienda web filtran `WHERE browser IS NOT NULL` para descartar silenciosamente los eventos del simulador (que no envían esos campos). Mientras corre el simulador esos paneles muestran "No data" — en cuanto los estudiantes abren la tienda web se llenan automáticamente.
 
 Cada archivo SQL define tres cosas en orden:
 1. **Tabla fuente** — cómo conectarse a Kafka y leer los mensajes
 2. **Tabla destino** — cómo conectarse a PostgreSQL y escribir los resultados
 3. **Job** — la lógica de transformación (filtros, agrupaciones, ventanas de tiempo)
+
+> **Idle timeout:** todos los jobs tienen `'scan.watermark.idle-timeout' = '5 s'`. Esto garantiza que si no llegan eventos por 5 segundos, Flink avanza el watermark igualmente y cierra las ventanas pendientes. Sin esto, periodos de inactividad (por ejemplo, nadie navegando en la tienda) congelarían el pipeline.
 
 ### Grafana
 
@@ -494,16 +519,65 @@ Cada archivo SQL define tres cosas en orden:
 
 **Dashboard incluido: "Clúster Big Data — Streaming en Tiempo Real"**
 
-| Panel | Tipo | Datos |
-|-------|------|-------|
+Paneles activos con el simulador y con la tienda web:
+
+| Panel | Tipo | Tabla PostgreSQL |
+|-------|------|-----------------|
 | Revenue por producto por minuto | Gráfico de líneas | `ventas_por_minuto` |
 | Revenue total acumulado | Stat | `ventas_por_minuto` |
 | Total de compras | Stat | `ventas_por_minuto` |
-| Eventos por tipo | Gráfico de barras | `eventos_por_tipo` |
+| Eventos por tipo (últimas ventanas) | Barras | `eventos_por_tipo` |
 | Top productos por revenue | Tabla | `ventas_por_minuto` |
 | Eventos por tipo en el tiempo | Gráfico de líneas | `eventos_por_tipo` |
 
-> El dashboard se refresca automáticamente cada **2 segundos** (configurable hasta 1s desde el selector de Grafana). A medida que el simulador genera eventos y Flink los procesa, los paneles se actualizan en tiempo real sin intervención manual.
+Paneles que se activan solo con la tienda web (muestran "No data" con el simulador):
+
+| Panel | Tipo | Tabla PostgreSQL |
+|-------|------|-----------------|
+| Funnel de conversión | Barras | `eventos_por_tipo` |
+| Top productos más visitados (hover) | Barras | `actividad_productos` |
+| Navegadores | Barras | `sesiones_navegadores` |
+| Sistemas operativos | Barras | `sesiones_navegadores` |
+| Estudiantes conectados (IP + browser + OS) | Tabla | `sesiones_navegadores` |
+
+> El dashboard se refresca automáticamente cada **2 segundos** (configurable hasta 1s desde el selector de Grafana).
+
+### Tienda Web (`tienda-web/`)
+
+Aplicación web incluida en el clúster que simula una tienda en línea. Los estudiantes abren `http://localhost:8091` en su browser, navegan por el catálogo y cada interacción se registra automáticamente en Kafka, pasa por Flink y aparece en Grafana en tiempo real.
+
+**Arquitectura:**
+
+```
+Browser del estudiante  →  FastAPI (puerto 8091)  →  Kafka (eventos-tienda)  →  Flink  →  PostgreSQL  →  Grafana
+```
+
+FastAPI sirve el frontend estático **y** expone el endpoint `/api/evento` que recibe los eventos del browser, los enriquece con IP y timestamp del servidor, y los publica en Kafka.
+
+**Eventos capturados:**
+
+| Evento | Cuándo se dispara |
+|--------|------------------|
+| `page_view` | Al abrir la página |
+| `product_hover` | Al pasar el mouse sobre una tarjeta de producto |
+| `add_to_cart` | Al hacer clic en "Agregar al carrito" |
+| `purchase` | Al hacer clic en "Comprar" (finaliza el carrito completo) |
+| `time_on_page` | Automáticamente cada 5 segundos mientras la página está abierta |
+
+**Datos capturados por evento:**
+
+- `product_id`, `product`, `category`, `price`, `quantity`, `total` — datos del producto
+- `user_id` — ID de sesión único por tab del browser (se genera en `sessionStorage`)
+- `browser` — Chrome, Firefox, Edge, Safari, etc. (detectado por JavaScript)
+- `os` — Windows, MacOS, Linux, Android (detectado por JavaScript)
+- `ip` — dirección IP real del cliente (capturada por FastAPI en el servidor)
+- `timestamp` — fecha/hora UTC (asignada por el servidor, no por el browser)
+
+**Sin Dockerfile:** la tienda usa la imagen oficial `python:3.11-slim`. Al arrancar, el contenedor instala las dependencias desde `requirements.txt` y lanza el servidor. Es consistente con el enfoque del resto del clúster — solo Docker Compose, sin imágenes personalizadas.
+
+**Compatibilidad con los Flink jobs:** El esquema de eventos es el mismo que usa `simulador.py`. Los jobs SQL existentes (`ventas_por_minuto`, `eventos_por_tipo`) procesan los eventos de la tienda sin modificaciones. El panel de Grafana se actualiza en tiempo real con las compras y navegación de los estudiantes.
+
+---
 
 ### Simulador de Eventos (`simulador.py`)
 

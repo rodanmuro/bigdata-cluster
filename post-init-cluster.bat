@@ -145,6 +145,8 @@ for /l %%i in (1,1,20) do (
 echo [POSTGRES-STREAMING] Creando tablas...
 docker exec postgres-streaming psql -U flink -d streaming -c "CREATE TABLE IF NOT EXISTS ventas_por_minuto (product_id VARCHAR(50), product VARCHAR(100), total_compras BIGINT, revenue DOUBLE PRECISION, ventana_inicio TIMESTAMP, ventana_fin TIMESTAMP, PRIMARY KEY (product_id, ventana_inicio));"
 docker exec postgres-streaming psql -U flink -d streaming -c "CREATE TABLE IF NOT EXISTS eventos_por_tipo (tipo VARCHAR(50), total_eventos BIGINT, ventana_inicio TIMESTAMP, ventana_fin TIMESTAMP, PRIMARY KEY (tipo, ventana_inicio));"
+docker exec postgres-streaming psql -U flink -d streaming -c "CREATE TABLE IF NOT EXISTS actividad_productos (product_id VARCHAR(50), product VARCHAR(100), tipo VARCHAR(50), total BIGINT, ventana_inicio TIMESTAMP, ventana_fin TIMESTAMP, PRIMARY KEY (product_id, tipo, ventana_inicio));"
+docker exec postgres-streaming psql -U flink -d streaming -c "CREATE TABLE IF NOT EXISTS sesiones_navegadores (ip VARCHAR(50), browser VARCHAR(50), os VARCHAR(50), total_eventos BIGINT, ventana_inicio TIMESTAMP, ventana_fin TIMESTAMP, PRIMARY KEY (ip, browser, os, ventana_inicio));"
 echo [POSTGRES-STREAMING] Tablas creadas.
 
 echo.
@@ -172,6 +174,8 @@ docker exec hadoop-namenode hdfs dfs -mkdir -p /flink/savepoints
 echo [FLINK] Enviando jobs SQL...
 docker exec flink-jobmanager ./bin/sql-client.sh -f /opt/flink/jobs/ventas_por_minuto.sql
 docker exec flink-jobmanager ./bin/sql-client.sh -f /opt/flink/jobs/eventos_por_tipo.sql
+docker exec flink-jobmanager ./bin/sql-client.sh -f /opt/flink/jobs/actividad_productos.sql
+docker exec flink-jobmanager ./bin/sql-client.sh -f /opt/flink/jobs/sesiones_navegadores.sql
 echo [FLINK] Jobs enviados.
 
 echo.

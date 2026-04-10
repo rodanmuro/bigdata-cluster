@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TiendaStream</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #f0f2f5;
+      color: #1a1a2e;
+    }
+
+    /* ── NAVBAR ── */
+    nav {
+      background: #1a1a2e;
+      color: white;
+      padding: 0 2rem;
+      height: 60px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .nav-brand {
+      font-size: 1.3rem;
+      font-weight: 700;
+      letter-spacing: 1px;
+    }
+
+    .nav-brand span { color: #e94560; }
+
+    .nav-right {
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+    }
+
+    .cart-btn {
+      background: #e94560;
+      color: white;
+      border: none;
+      padding: 0.5rem 1.2rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.95rem;
+      font-weight: 600;
+      transition: background 0.2s;
+    }
+
+    .cart-btn:hover { background: #c73652; }
+    .cart-btn:disabled { background: #555; cursor: default; }
+
+    #cart-count {
+      background: white;
+      color: #1a1a2e;
+      border-radius: 50%;
+      width: 22px;
+      height: 22px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      font-weight: 700;
+      margin-left: 0.4rem;
+    }
+
+    /* ── MAIN ── */
+    main {
+      max-width: 1100px;
+      margin: 2rem auto;
+      padding: 0 1.5rem;
+    }
+
+    h2 {
+      font-size: 1.1rem;
+      color: #555;
+      margin-bottom: 1.5rem;
+      font-weight: 400;
+    }
+
+    /* ── GRID ── */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 1.2rem;
+    }
+
+    /* ── CARD ── */
+    .card {
+      background: white;
+      border-radius: 10px;
+      padding: 1.4rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+      transition: transform 0.15s, box-shadow 0.15s;
+      cursor: default;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+    }
+
+    .card-emoji { font-size: 2.2rem; }
+
+    .card-name {
+      font-size: 1rem;
+      font-weight: 600;
+      line-height: 1.3;
+    }
+
+    .card-category {
+      font-size: 0.78rem;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .card-price {
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: #e94560;
+      margin-top: 0.3rem;
+    }
+
+    .add-btn {
+      margin-top: auto;
+      padding: 0.5rem;
+      border: 2px solid #1a1a2e;
+      background: white;
+      border-radius: 6px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .add-btn:hover {
+      background: #1a1a2e;
+      color: white;
+    }
+
+    .add-btn.added {
+      background: #1a1a2e;
+      color: white;
+    }
+
+    /* ── TOAST ── */
+    #toast {
+      position: fixed;
+      bottom: 2rem;
+      right: 2rem;
+      background: #1a1a2e;
+      color: white;
+      padding: 0.8rem 1.4rem;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+      z-index: 999;
+    }
+
+    #toast.show { opacity: 1; }
+
+    /* ── SESSION INFO ── */
+    #session-info {
+      font-size: 0.75rem;
+      color: #aaa;
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-brand">Tienda<span>Stream</span></div>
+  <div class="nav-right">
+    <span id="session-info"></span>
+    <button class="cart-btn" id="checkout-btn" onclick="checkout()" disabled>
+      Comprar <span id="cart-count">0</span>
+    </button>
+  </div>
+</nav>
+
+<main>
+  <h2>Catálogo de productos — todos los eventos se registran en tiempo real</h2>
+  <div class="grid" id="grid"></div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+  // ── CATÁLOGO ────────────────────────────────────────────────────────────────
+  const PRODUCTOS = [
+    { id: "P001", name: "Audífonos Bluetooth",  category: "Electrónica", price: 49.99,  emoji: "🎧" },
+    { id: "P002", name: "Teclado Mecánico",     category: "Electrónica", price: 89.99,  emoji: "⌨️" },
+    { id: "P003", name: "Mouse Gaming",         category: "Electrónica", price: 34.99,  emoji: "🖱️" },
+    { id: "P004", name: "Monitor 4K",           category: "Electrónica", price: 399.99, emoji: "🖥️" },
+    { id: "P005", name: "Silla Ergonómica",     category: "Muebles",     price: 299.99, emoji: "🪑" },
+    { id: "P006", name: "Escritorio Ajustable", category: "Muebles",     price: 459.99, emoji: "🗂️" },
+    { id: "P007", name: "Lámpara LED",          category: "Hogar",       price: 24.99,  emoji: "💡" },
+    { id: "P008", name: "Mochila Laptop",       category: "Accesorios",  price: 59.99,  emoji: "🎒" },
+  ];
+
+  // ── SESIÓN ──────────────────────────────────────────────────────────────────
+  let sessionId = sessionStorage.getItem("session_id");
+  if (!sessionId) {
+    sessionId = "s-" + Math.random().toString(36).slice(2, 10);
+    sessionStorage.setItem("session_id", sessionId);
+  }
+
+  // Browser / OS desde User-Agent
+  const ua = navigator.userAgent;
+  const browser = ua.includes("Edg") ? "Edge"
+                : ua.includes("Chrome") ? "Chrome"
+                : ua.includes("Firefox") ? "Firefox"
+                : ua.includes("Safari") ? "Safari"
+                : "Otro";
+  const os = ua.includes("Windows") ? "Windows"
+           : ua.includes("Mac") ? "MacOS"
+           : ua.includes("Linux") ? "Linux"
+           : ua.includes("Android") ? "Android"
+           : "Otro";
+
+  document.getElementById("session-info").textContent = `${sessionId} · ${browser} · ${os}`;
+
+  // ── CARRITO ─────────────────────────────────────────────────────────────────
+  const carrito = {};
+
+  function actualizarCarrito() {
+    const total = Object.values(carrito).reduce((s, i) => s + i.quantity, 0);
+    document.getElementById("cart-count").textContent = total;
+    document.getElementById("checkout-btn").disabled = total === 0;
+  }
+
+  // ── ENVÍO DE EVENTOS ────────────────────────────────────────────────────────
+  function enviar(tipo, producto = null, extra = {}) {
+    const evento = {
+      type:       tipo,
+      product_id: producto?.id   ?? "",
+      product:    producto?.name ?? "",
+      category:   producto?.category ?? "",
+      price:      producto?.price ?? 0,
+      quantity:   extra.quantity ?? 0,
+      total:      extra.total    ?? 0,
+      user_id:    sessionId,
+      browser,
+      os,
+      ...extra,
+    };
+    // timestamp e ip los agrega el servidor
+    fetch("/api/evento", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(evento),
+    }).catch(() => {}); // silenciar errores de red en consola
+  }
+
+  // ── TOAST ───────────────────────────────────────────────────────────────────
+  function toast(msg) {
+    const el = document.getElementById("toast");
+    el.textContent = msg;
+    el.classList.add("show");
+    setTimeout(() => el.classList.remove("show"), 2000);
+  }
+
+  // ── ACCIONES ────────────────────────────────────────────────────────────────
+  function agregarAlCarrito(producto, btn) {
+    if (!carrito[producto.id]) {
+      carrito[producto.id] = { ...producto, quantity: 0 };
+    }
+    carrito[producto.id].quantity++;
+    actualizarCarrito();
+    btn.classList.add("added");
+    btn.textContent = `En carrito (${carrito[producto.id].quantity})`;
+    enviar("add_to_cart", producto, { quantity: 1, total: producto.price });
+    toast(`${producto.name} agregado al carrito`);
+  }
+
+  function checkout() {
+    const items = Object.values(carrito);
+    if (items.length === 0) return;
+    items.forEach(item => {
+      enviar("purchase", item, {
+        quantity: item.quantity,
+        total: +(item.price * item.quantity).toFixed(2),
+      });
+    });
+    // Limpiar carrito
+    Object.keys(carrito).forEach(k => delete carrito[k]);
+    actualizarCarrito();
+    // Resetear botones
+    document.querySelectorAll(".add-btn").forEach(b => {
+      const p = PRODUCTOS.find(p => b.dataset.id === p.id);
+      if (p) { b.classList.remove("added"); b.textContent = "Agregar al carrito"; }
+    });
+    toast("¡Compra realizada! Revisa Grafana.");
+  }
+
+  // ── RENDERIZAR CARDS ────────────────────────────────────────────────────────
+  const grid = document.getElementById("grid");
+
+  PRODUCTOS.forEach(p => {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `
+      <div class="card-emoji">${p.emoji}</div>
+      <div class="card-name">${p.name}</div>
+      <div class="card-category">${p.category}</div>
+      <div class="card-price">$${p.price.toFixed(2)}</div>
+      <button class="add-btn" data-id="${p.id}">Agregar al carrito</button>
+    `;
+
+    // product_hover: mouseenter en la card
+    card.addEventListener("mouseenter", () => {
+      enviar("product_hover", p);
+    });
+
+    // add_to_cart: clic en el botón
+    const btn = card.querySelector(".add-btn");
+    btn.addEventListener("click", () => agregarAlCarrito(p, btn));
+
+    grid.appendChild(card);
+  });
+
+  // ── EVENTOS AUTOMÁTICOS ─────────────────────────────────────────────────────
+  // page_view al cargar
+  enviar("page_view");
+
+  // time_on_page cada 5 segundos
+  setInterval(() => enviar("time_on_page"), 5000);
+</script>
+
+</body>
+</html>

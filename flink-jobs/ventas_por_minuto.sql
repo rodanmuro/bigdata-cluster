@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS eventos_tienda (
     'properties.group.id'           = 'flink-ventas',
     'scan.startup.mode'             = 'earliest-offset',
     'format'                        = 'json',
-    'json.ignore-parse-errors'      = 'true'
+    'json.ignore-parse-errors'      = 'true',
+    'scan.watermark.idle-timeout'   = '5 s'
 );
 
 -- 2. Tabla destino: PostgreSQL

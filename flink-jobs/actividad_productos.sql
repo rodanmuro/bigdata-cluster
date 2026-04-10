@@ -1,11 +1,11 @@
 -- ─────────────────────────────────────────────────────────────────
--- Job: eventos_por_tipo
--- Cuenta todos los eventos por tipo cada 30 segundos.
--- Útil para ver en tiempo real cuántos page_views, purchases,
--- cart_abandons, etc. están ocurriendo.
+-- Job: actividad_productos
+-- Cuenta product_hover, add_to_cart y purchase por producto.
+-- Solo procesa eventos de la tienda web (browser IS NOT NULL).
+-- Cuando corre el simulador estos eventos se descartan silenciosamente.
 -- ─────────────────────────────────────────────────────────────────
 
--- 1. Tabla fuente: reutiliza el mismo topic Kafka
+-- 1. Tabla fuente: topic Kafka con campos extendidos de la tienda web
 CREATE TABLE IF NOT EXISTS eventos_tienda (
     type        STRING,
     product_id  STRING,
@@ -15,6 +15,9 @@ CREATE TABLE IF NOT EXISTS eventos_tienda (
     quantity    INT,
     total       DOUBLE,
     user_id     STRING,
+    browser     STRING,
+    os          STRING,
+    ip          STRING,
     event_time  AS TO_TIMESTAMP(`timestamp`, 'yyyy-MM-dd''T''HH:mm:ss''Z'''),
     `timestamp` STRING,
     WATERMARK FOR event_time AS event_time - INTERVAL '2' SECOND
@@ -22,7 +25,7 @@ CREATE TABLE IF NOT EXISTS eventos_tienda (
     'connector'                     = 'kafka',
     'topic'                         = 'eventos-tienda',
     'properties.bootstrap.servers'  = 'kafka:9092',
-    'properties.group.id'           = 'flink-eventos',
+    'properties.group.id'           = 'flink-actividad',
     'scan.startup.mode'             = 'earliest-offset',
     'format'                        = 'json',
     'json.ignore-parse-errors'      = 'true',
@@ -30,28 +33,37 @@ CREATE TABLE IF NOT EXISTS eventos_tienda (
 );
 
 -- 2. Tabla destino: PostgreSQL
-CREATE TABLE IF NOT EXISTS eventos_por_tipo (
-    tipo            STRING,
-    total_eventos   BIGINT,
-    ventana_inicio  TIMESTAMP(3),
-    ventana_fin     TIMESTAMP(3),
-    PRIMARY KEY (tipo, ventana_inicio) NOT ENFORCED
+CREATE TABLE IF NOT EXISTS actividad_productos (
+    product_id     STRING,
+    product        STRING,
+    tipo           STRING,
+    total          BIGINT,
+    ventana_inicio TIMESTAMP(3),
+    ventana_fin    TIMESTAMP(3),
+    PRIMARY KEY (product_id, tipo, ventana_inicio) NOT ENFORCED
 ) WITH (
     'connector'  = 'jdbc',
     'url'        = 'jdbc:postgresql://postgres-streaming:5432/streaming',
-    'table-name' = 'eventos_por_tipo',
+    'table-name' = 'actividad_productos',
     'username'   = 'flink',
     'password'   = 'flink'
 );
 
--- 3. Job: cuenta eventos por tipo cada 30 segundos
-INSERT INTO eventos_por_tipo
+-- 3. Job: cuenta interacciones por producto cada segundo
+--    WHERE browser IS NOT NULL  →  descarta eventos del simulador
+INSERT INTO actividad_productos
 SELECT
+    product_id,
+    MAX(product)                                            AS product,
     type                                                    AS tipo,
-    COUNT(*)                                                AS total_eventos,
+    COUNT(*)                                                AS total,
     TUMBLE_START(event_time, INTERVAL '1' SECOND)           AS ventana_inicio,
     TUMBLE_END(event_time, INTERVAL '1' SECOND)             AS ventana_fin
 FROM eventos_tienda
+WHERE browser IS NOT NULL
+  AND product_id <> ''
+  AND type IN ('product_hover', 'add_to_cart', 'purchase')
 GROUP BY
+    product_id,
     type,
     TUMBLE(event_time, INTERVAL '1' SECOND);

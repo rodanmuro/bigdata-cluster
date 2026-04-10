@@ -6,7 +6,7 @@ state.savepoints.dir: hdfs://hadoop-namenode:9000/flink/savepoints
 jobmanager.rpc.port: 6123
 query.server.port: 6125
 rest.port: 8081
-parallelism.default: 2
+parallelism.default: 1
 taskmanager.numberOfTaskSlots: 4
 rest.address: 0.0.0.0
 state.backend: filesystem

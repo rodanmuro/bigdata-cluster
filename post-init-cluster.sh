@@ -73,6 +73,8 @@ init_flink() {
     echo "[FLINK] Enviando jobs SQL..."
     docker exec flink-jobmanager ./bin/sql-client.sh -f /opt/flink/jobs/ventas_por_minuto.sql 2>&1 | grep -E "Job ID|ERROR"
     docker exec flink-jobmanager ./bin/sql-client.sh -f /opt/flink/jobs/eventos_por_tipo.sql 2>&1 | grep -E "Job ID|ERROR"
+    docker exec flink-jobmanager ./bin/sql-client.sh -f /opt/flink/jobs/actividad_productos.sql 2>&1 | grep -E "Job ID|ERROR"
+    docker exec flink-jobmanager ./bin/sql-client.sh -f /opt/flink/jobs/sesiones_navegadores.sql 2>&1 | grep -E "Job ID|ERROR"
 
     echo "[FLINK] Jobs enviados."
 }
@@ -116,6 +118,26 @@ init_postgres_streaming() {
             ventana_inicio  TIMESTAMP,
             ventana_fin     TIMESTAMP,
             PRIMARY KEY (tipo, ventana_inicio)
+        );
+
+        CREATE TABLE IF NOT EXISTS actividad_productos (
+            product_id      VARCHAR(50),
+            product         VARCHAR(100),
+            tipo            VARCHAR(50),
+            total           BIGINT,
+            ventana_inicio  TIMESTAMP,
+            ventana_fin     TIMESTAMP,
+            PRIMARY KEY (product_id, tipo, ventana_inicio)
+        );
+
+        CREATE TABLE IF NOT EXISTS sesiones_navegadores (
+            ip              VARCHAR(50),
+            browser         VARCHAR(50),
+            os              VARCHAR(50),
+            total_eventos   BIGINT,
+            ventana_inicio  TIMESTAMP,
+            ventana_fin     TIMESTAMP,
+            PRIMARY KEY (ip, browser, os, ventana_inicio)
         );
     "
     echo "[POSTGRES-STREAMING] Tablas creadas."
