@@ -890,6 +890,170 @@ docker compose down && docker compose up
 
 ---
 
+## Clúster Hadoop Distribuido en AWS (`aws-hadoop-cluster/`)
+
+Además del clúster local con Docker Compose, el repositorio incluye scripts para desplegar un clúster Hadoop **real y distribuido en AWS EC2**: 3 instancias separadas (1 NameNode + 2 DataNodes), cada una con Docker. Está pensado para demostraciones en aula donde se quiere mostrar un entorno distribuido real sin infraestructura on-premise.
+
+Todo el despliegue se automatiza con **AWS CLI** — no se requiere entrar a la consola web de AWS para ningún paso. Un solo script crea la red, las instancias, la configuración y devuelve las URLs listas para usar.
+
+### Prerrequisitos
+
+#### 1. Cuenta AWS con usuario IAM
+
+No se puede usar la cuenta **root** de AWS directamente para este tipo de trabajo. La práctica recomendada es:
+
+1. Entrar a la consola web de AWS con la cuenta root: `https://console.aws.amazon.com`
+2. Ir a **IAM → Users → Create user**
+3. Asignarle permisos de administrador (o al menos: EC2 full access)
+4. El usuario IAM tiene su propia URL de acceso: `https://<account-id>.signin.aws.amazon.com/console`
+5. Una vez creado el usuario, ir a **IAM → Users → tu-usuario → Security credentials → Create access key**
+6. Guardar el **Access Key ID** y el **Secret Access Key** — solo se muestran una vez
+
+#### 2. AWS CLI instalado en tu máquina
+
+```bash
+# Linux
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip awscliv2.zip && sudo ./aws/install
+
+# Mac
+brew install awscli
+
+# Windows
+# Descargar el instalador desde: https://aws.amazon.com/cli/
+```
+
+#### 3. Configurar las credenciales localmente
+
+```bash
+aws configure
+```
+
+El comando pedirá:
+
+```
+AWS Access Key ID:     <tu Access Key ID del paso anterior>
+AWS Secret Access Key: <tu Secret Access Key del paso anterior>
+Default region name:   us-east-1
+Default output format: json
+```
+
+Las credenciales se guardan en `~/.aws/credentials`. Para verificar que funcionan:
+
+```bash
+aws sts get-caller-identity
+```
+
+Si devuelve tu `Account`, `UserId` y `Arn`, está correctamente configurado.
+
+### Arquitectura
+
+```
+Internet
+    │
+    ├── EC2 NameNode (t3.medium)   → Web UI: http://<IP>:9870
+    │       └── hadoop-namenode (Docker)
+    │
+    ├── EC2 DataNode 1 (t3.medium) → Web UI: http://<IP>:9864
+    │       └── hadoop-datanode (Docker)
+    │
+    └── EC2 DataNode 2 (t3.medium) → Web UI: http://<IP>:9864
+            └── hadoop-datanode (Docker)
+```
+
+Los 3 nodos se comunican entre sí usando el **DNS interno de AWS** (`ip-X-X-X-X.ec2.internal`). El NameNode captura su propio DNS interno desde el servicio de metadatos de EC2 (`169.254.169.254`) al arrancar y lo escribe en `core-site.xml`. Los DataNodes reciben ese DNS en su `core-site.xml` al momento del despliegue. Así la comunicación intra-clúster usa red privada (sin coste de transferencia) y es estable sin necesidad de IPs elásticas.
+
+### Scripts disponibles
+
+```
+aws-hadoop-cluster/
+├── deploy.sh      # Despliega el clúster completo
+├── teardown.sh    # Elimina todos los recursos AWS creados
+└── status.sh      # Muestra el estado actual de las instancias
+```
+
+### Desplegar el clúster
+
+```bash
+cd aws-hadoop-cluster
+bash deploy.sh
+```
+
+El script realiza automáticamente con AWS CLI:
+
+1. Crea un **key pair** y guarda el `.pem` localmente
+2. Busca el **AMI Ubuntu 22.04** más reciente en la región
+3. Crea una **VPC** (10.0.0.0/16) con DNS hostnames habilitado, subnet en `us-east-1a`, Internet Gateway y route table
+4. Crea un **security group** con los siguientes puertos abiertos:
+
+| Puerto | Descripción |
+|--------|-------------|
+| 22 | SSH |
+| 9870 | NameNode Web UI |
+| 9864 | DataNode Web UI |
+| 9866 | DataNode — transferencia de datos (upload desde browser) |
+| Todos (intra-grupo) | Comunicación libre entre los 3 nodos |
+
+5. Lanza el **NameNode** — su `user-data` instala Docker, genera `core-site.xml` con su propio DNS interno y arranca el contenedor
+6. Espera a que el NameNode obtenga IP y DNS privado
+7. Lanza los **2 DataNodes** con el DNS del NameNode ya escrito en su `core-site.xml`
+8. Guarda todos los IDs de recursos en `cluster-state.env` para el teardown
+9. Imprime las URLs y comandos SSH
+
+Al terminar el deploy, el bootstrap de Docker sigue corriendo en las instancias en segundo plano (~3-5 minutos). Las interfaces web están disponibles cuando responden HTTP 302.
+
+### Configuraciones clave aplicadas
+
+| Problema | Solución |
+|----------|----------|
+| Hadoop no podía escribir en el volumen Docker | `user: "0:0"` en docker-compose + `mkdir -p` antes de arrancar |
+| NameNode no podía hacer bind en el DNS de AWS desde dentro del contenedor | `dfs.namenode.rpc-bind-host=0.0.0.0` y `dfs.namenode.http-bind-host=0.0.0.0` en `hdfs-site.xml` |
+| Browser no podía subir archivos (redirigía a IP interna del contenedor) | `dfs.datanode.hostname=<IP_PUBLICA>` obtenida del metadata de EC2, y `dfs.client.use.datanode.hostname=true` |
+| Web UI mostraba "Permission denied: user=dr.who" | `hadoop.http.staticuser.user=hdfs` en `core-site.xml` |
+| NameNode reformateaba en cada reinicio, desincronizando cluster IDs | Formato condicional: solo si no existe `/hadoop/dfs/name/current` |
+
+### Usar el clúster
+
+Una vez desplegado, la UI del NameNode permite explorar HDFS y subir archivos:
+
+1. Ir a `http://<NameNode_IP>:9870`
+2. **Utilities → Browse the file system**
+3. Navegar a `/data` (carpeta creada con permisos abiertos por el script)
+4. Usar el botón de subida para cargar archivos directamente desde el browser
+
+Los DataNodes aparecen bajo **Datanodes** → "In service" (2 nodos). El factor de replicación es **2**: cada archivo se almacena una copia en cada DataNode.
+
+> **Replicación = 2:** si subes un archivo de 200 MB, se consumen 400 MB del clúster (200 MB × 2 copias). La ventaja es tolerancia a fallos — si un DataNode cae, el archivo sigue disponible en el otro.
+
+### Ver el estado
+
+```bash
+bash status.sh
+```
+
+Muestra el estado de cada instancia (running / stopped / terminated), IPs públicas actuales y URLs.
+
+### Bajar el clúster
+
+```bash
+bash teardown.sh
+```
+
+Pide confirmación, luego elimina en orden: instancias EC2 → security group → IGW → subnet → VPC → key pair. El archivo `cluster-state.env` y el `.pem` local se eliminan automáticamente.
+
+### Costo estimado
+
+| Concepto | Costo |
+|----------|------:|
+| 3 × t3.medium (`us-east-1`) | ~$0.042/hora × 3 = ~$0.13/hora |
+| EBS 8 GB × 3 instancias | ~$0.001/hora total |
+| Transferencia de datos | despreciable en demo |
+| **Total para una clase de 2 horas** | **< $0.30 USD** |
+
+> Ejecutar `teardown.sh` al terminar la clase deja la cuenta completamente limpia sin cargos continuos.
+
+---
+
 ## Consideraciones Finales
 
 * Este entorno está diseñado con fines **académicos**.
