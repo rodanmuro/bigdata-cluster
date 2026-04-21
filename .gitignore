@@ -4,3 +4,7 @@ flink-jars/*.jar
 # Archivos compilados de Python
 __pycache__/
 *.pyc
+
+# AWS cluster — archivos generados en tiempo de ejecución (credenciales y estado)
+aws-hadoop-cluster/*.pem
+aws-hadoop-cluster/cluster-state.env
