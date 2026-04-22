@@ -29,10 +29,20 @@
     <value>org.apache.hadoop.fs.s3a.AnonymousAWSCredentialsProvider</value>
   </property>
 
-  <!-- Acceso estilo path, necesario si tu bucket es público y no usa DNS-style virtual hosting -->
+  <property>
+    <name>fs.s3a.endpoint</name>
+    <value>s3.us-east-1.amazonaws.com</value>
+  </property>
+
+  <property>
+    <name>fs.s3a.endpoint.region</name>
+    <value>us-east-1</value>
+  </property>
+
+  <!-- Para AWS S3 estándar suele funcionar mejor virtual-host style -->
   <property>
     <name>fs.s3a.path.style.access</name>
-    <value>true</value>
+    <value>false</value>
   </property>
 
 </configuration>
